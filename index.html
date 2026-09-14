@@ -808,7 +808,7 @@ document.addEventListener("click", ev=>{
   if(a==="a-zeit-del"){ if(confirm("Eintrag löschen?")){ del("zeiten/"+id); render(); } return; }
   if(a==="a-zeit-save") return adminZeitSave();
   if(a==="ma-save") return maSave(id);
-  if(a==="ma-edit"){ uiEditMa=id; return render(); }
+  if(a==="ma-edit"){ uiEditMa=id; render(); scrollTo_("m_name"); return; }
   if(a==="ma-abbruch"){ uiEditMa=""; return render(); }
   if(a==="code-neu"){ uiNeuerCode=freierCode(); return render(); }
   if(a==="ma-del") return maDel(id);
@@ -831,7 +831,12 @@ document.addEventListener("keydown", ev=>{
   if(ev.target.id==="pin") pinLogin();
   if(ev.target.id==="l_pw"||ev.target.id==="l_mail") leitungLogin();
 });
-function scrollTo_(elId){ const f=document.getElementById(elId); if(f) f.scrollIntoView({block:"center"}); }
+function scrollTo_(elId){
+  const f=document.getElementById(elId); if(!f) return;
+  const karte=f.closest(".card")||f;
+  try{ karte.scrollIntoView({block:"start",behavior:"smooth"}); }
+  catch(e){ karte.scrollIntoView(); }
+}
 
 function dienstSave(){
   const admin=SESSION.role==="admin";
