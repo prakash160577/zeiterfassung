@@ -707,9 +707,9 @@ function adminMa(){
           <option value="monat" ${fest?"selected":""}>Festgehalt</option>
         </select></div>
     </div>
-    <label for="m_lohn">${fest?"Monatsgehalt brutto €":"Stundenlohn €"}</label>
+    <label for="m_lohn" id="m_lohn_label">${fest?"Monatsgehalt brutto €":"Stundenlohn €"}</label>
     <input id="m_lohn" type="number" step="0.01" inputmode="decimal" value="${e?esc((fest?gehaltVon(uiEditMa):lohnVon(uiEditMa))||""):""}" placeholder="${fest?"2400.00":"13.50"}">
-    <label style="display:flex;gap:8px;align-items:center;margin-top:12px">
+    <label id="m_mj_row" style="display:${fest?"none":"flex"};gap:8px;align-items:center;margin-top:12px">
       <input type="checkbox" id="m_mj" style="width:auto" ${(!e||e.minijob!==false)&&!fest?"checked":""}> Minijob (Grenze ${MINIJOB_GRENZE} € überwachen)
     </label>
     ${e?"":`<button class="linkbtn" data-act="code-neu">Anderen Code vorschlagen</button>`}
@@ -732,6 +732,17 @@ function adminMa(){
         <button class="mini warn" data-act="ma-del" data-id="${m.id}">löschen</button></div></li>`).join("")}
   </ul></div>
   <p class="hint">Die Bereiche hier dienen nur der Sortierung und dem Stundenzettel. Wer an einem Tag wo eingeteilt ist, legst du im Dienstplan fest.<br>Beim Anlegen wird automatisch ein Zugang erstellt. Den Code gibst du dem Mitarbeiter weiter – er ist gleichzeitig sein Passwort.</p>`;
+}
+function artUmschalten(){
+  const fest=document.getElementById("m_art").value==="monat";
+  const lab=document.getElementById("m_lohn_label");
+  const feld=document.getElementById("m_lohn");
+  const row=document.getElementById("m_mj_row");
+  const mj=document.getElementById("m_mj");
+  if(lab) lab.textContent = fest ? "Monatsgehalt brutto €" : "Stundenlohn €";
+  if(feld) feld.placeholder = fest ? "2400.00" : "13.50";
+  if(row) row.style.display = fest ? "none" : "flex";
+  if(fest&&mj) mj.checked=false;
 }
 function adminHin(){
   const hs=Object.keys(DATA.hinweise).map(id=>Object.assign({id},DATA.hinweise[id])).sort((a,b)=>b.ts-a.ts);
@@ -825,6 +836,7 @@ document.addEventListener("input", ev=>{
   if(ev.target.id==="bfilter"){ uiFilter=ev.target.value; render(); }
   if(ev.target.id==="sort_ueb"){ uiSortUeb=ev.target.value; render(); }
   if(ev.target.id==="sort_ma"){ uiSortMa=ev.target.value; render(); }
+  if(ev.target.id==="m_art") artUmschalten();
 });
 document.addEventListener("keydown", ev=>{
   if(ev.key!=="Enter") return;
@@ -923,7 +935,8 @@ async function maSave(id){
   const code=document.getElementById("m_code").value.trim();
   const betrag=Number(document.getElementById("m_lohn").value||0);
   const artFest=document.getElementById("m_art").value==="monat";
-  const minijob=document.getElementById("m_mj").checked;
+  const artFest2=document.getElementById("m_art").value==="monat";
+  const minijob=artFest2?false:document.getElementById("m_mj").checked;
   if(!name){ setFlash("err","Bitte einen Namen eintragen."); return render(); }
   if(!/^\d{4}$/.test(code)){ setFlash("err","Der Zugangscode muss aus genau 4 Ziffern bestehen."); return render(); }
   if(maList().some(m=>m.id!==id && codeVon(m.id)===code)){ setFlash("err","Diesen Code hat schon jemand."); return render(); }
