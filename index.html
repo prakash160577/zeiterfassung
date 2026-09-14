@@ -65,6 +65,7 @@ button.mini.warn{color:var(--bad);border-color:#e6c6c3}
 .shift.mine{background:#f0e4e9;border-left:4px solid var(--accent)}
 .shift.free{background:#fff6e5;border-left:4px solid var(--warn)}
 .shift .t{font-weight:700}
+.shift .btns{display:flex;gap:6px;flex-shrink:0}
 .schicht{margin-top:8px}
 .schichtname{display:block;font:700 12px "Nunito Sans";letter-spacing:.04em;text-transform:uppercase;color:var(--ink2);margin-bottom:2px}
 .sortbar{display:flex;align-items:center;gap:10px;padding:10px 14px}
@@ -134,11 +135,15 @@ const COLL = {
   zeiten:"zeit_zeiten",
   hinweise:"zeit_hinweise"
 };
-const META_COLL = "zeit_meta", META_DOC = "main";
+const META_COLL = "zeit_meta", META_DOC = "main";          // Abgaben, nur Leitung
+const KAL_COLL  = "zeit_kalender", KAL_DOC = "main";       // Öffnungstage, alle lesen
+const STD_TAGE = [1,4,5,6,0];                              // Mo, Do, Fr, Sa, So
+const WOCHE = [[1,"Montag"],[2,"Dienstag"],[3,"Mittwoch"],[4,"Donnerstag"],[5,"Freitag"],[6,"Samstag"],[0,"Sonntag"]];
 const BEREICHE = ["Service","Theke","Küche","Spüle","Reinigung","Büro","Springer"];
 const PLAN_BEREICHE = ["Service","Theke","Küche","Spüle","Springer"];   // nur diese im Dienstplan
 const SCHICHT_NAME = {nachmittag:"Nachmittag", abend:"Abend", beide:"Nachmittag + Abend"};
-const DEFAULT_ABGABEN = 32;
+const DEFAULT_ABGABEN = 32;        // Minijob pauschal
+const DEFAULT_ABGABEN_FEST = 21;   // Arbeitgeberanteil bei Festanstellung
 const MINIJOB_GRENZE = 556;
 </script>
 
@@ -146,7 +151,7 @@ const MINIJOB_GRENZE = 556;
 /* ==========================================================
    Zustand
    ========================================================== */
-let DATA = {mitarbeiter:{},privat:{},dienste:{},zeiten:{},hinweise:{},meta:{}};
+let DATA = {mitarbeiter:{},privat:{},dienste:{},zeiten:{},hinweise:{},meta:{},kalender:{}};
 let fb=null, fs=null, auth=null;
 let SESSION=null, AUTHREADY=false, BUSY=false;
 let VIEW="", weekOffset=0, monthOffset=0, detailId=null;
@@ -182,6 +187,7 @@ function save(path,val){
   setNode(path,val);
   if(!fs) return;
   if(p[0]==="meta"){ fs.collection(META_COLL).doc(META_DOC).set(val,{merge:true}).catch(fehler); return; }
+  if(p[0]==="kalender"){ fs.collection(KAL_COLL).doc(KAL_DOC).set(val,{merge:true}).catch(fehler); return; }
   const c=COLL[p[0]]; if(!c) return;
   if(p.length===2) fs.collection(c).doc(p[1]).set(val).catch(fehler);
   else if(p.length===3) fs.collection(c).doc(p[1]).set({[p[2]]:val},{merge:true}).catch(fehler);
@@ -201,12 +207,14 @@ function syncLeitung(){
   stopSync();
   ["mitarbeiter","privat","dienste","zeiten","hinweise"].forEach(k=>listen(k, fs.collection(COLL[k])));
   unsubs.push(fs.collection(META_COLL).doc(META_DOC).onSnapshot(d=>{ DATA.meta=d.data()||{}; render(); }, ()=>{}));
+  unsubs.push(fs.collection(KAL_COLL).doc(KAL_DOC).onSnapshot(d=>{ DATA.kalender=d.data()||{}; render(); }, ()=>{}));
 }
 function syncMitarbeiter(maId){
   stopSync();
   listen("mitarbeiter", fs.collection(COLL.mitarbeiter));
   listen("dienste", fs.collection(COLL.dienste));
   listen("zeiten", fs.collection(COLL.zeiten).where("maId","==",maId));
+  unsubs.push(fs.collection(KAL_COLL).doc(KAL_DOC).onSnapshot(d=>{ DATA.kalender=d.data()||{}; render(); }, ()=>{}));
   DATA.privat={}; DATA.hinweise={}; DATA.meta={};
 }
 
@@ -222,7 +230,7 @@ function start(){
   fs.enablePersistence({synchronizeTabs:true}).catch(()=>{});
   auth.onAuthStateChanged(async u=>{
     AUTHREADY=true;
-    if(!u){ SESSION=null; stopSync(); DATA={mitarbeiter:{},privat:{},dienste:{},zeiten:{},hinweise:{},meta:{}}; return render(); }
+    if(!u){ SESSION=null; stopSync(); DATA={mitarbeiter:{},privat:{},dienste:{},zeiten:{},hinweise:{},meta:{},kalender:{}}; return render(); }
     const istLeitung = LEITUNG_UID ? (u.uid===LEITUNG_UID) : !!(u.email && !u.email.endsWith(PIN_DOMAIN));
     if(istLeitung){
       SESSION={role:"admin"};
@@ -318,8 +326,14 @@ function dienstList(){ return Object.keys(DATA.dienste).map(id=>Object.assign({i
 function netto(z){ return Math.max(0, dauer(z.von,z.bis)-(z.pause||0)); }
 function monatMin(maId,mk){ return zeitList().filter(z=>z.maId===maId&&z.datum.startsWith(mk)).reduce((s,z)=>s+netto(z),0); }
 function lohnVon(maId){ return Number((DATA.privat[maId]||{}).lohn||0); }
+function gehaltVon(maId){ return Number((DATA.privat[maId]||{}).gehalt||0); }
+function istFest(maId){ return !!(DATA.privat[maId]||{}).fest; }
+function kostenVon(maId,minuten){ return istFest(maId) ? gehaltVon(maId) : std(minuten)*lohnVon(maId); }
+function satzVon(maId){ return istFest(maId) ? abgFest() : abgSatz(); }
+function tageOffen(){ return Array.isArray(DATA.kalender.tage) ? DATA.kalender.tage : STD_TAGE; }
 function codeVon(maId){ return (DATA.privat[maId]||{}).code||""; }
 function abgSatz(){ return DATA.meta.abgaben===undefined?DEFAULT_ABGABEN:Number(DATA.meta.abgaben); }
+function abgFest(){ return DATA.meta.abgabenFest===undefined?DEFAULT_ABGABEN_FEST:Number(DATA.meta.abgabenFest); }
 function nachtragOK(datum){ return datum===heute()||datum===gestern(); }
 function codeBelegt(c){ return maList().some(m=>codeVon(m.id)===c); }
 function langweilig(c){
@@ -405,8 +419,10 @@ function loginView(){
 
 /* ---------- Dienstplan ---------- */
 function planView(admin){
-  const tage=wochenTage(weekOffset), ds=dienstList();
-  const von=dParse(tage[0]), bis=dParse(tage[6]);
+  const alleTage=wochenTage(weekOffset), ds=dienstList();
+  const offen=tageOffen();
+  const tage=alleTage.filter(t=>offen.indexOf(dParse(t).getDay())>=0||ds.some(d=>d.datum===t));
+  const von=dParse(alleTage[0]), bis=dParse(alleTage[6]);
   return `
   <div class="navmonth">
     <button class="mini" data-act="week" data-d="-1">‹ Woche</button>
@@ -421,8 +437,9 @@ function planView(admin){
     </select>
     ${weekOffset!==0?`<button class="btn ghost" data-act="week" data-d="0">Zur aktuellen Woche</button>`:""}
   </div>
-  ${admin?dienstFormular():""}
+  ${dienstFormular()}
   <div class="card flat">
+    ${tage.length===0?`<div class="daybox"><span class="muted">Diese Woche ist kein Öffnungstag eingetragen.</span></div>`:""}
     ${tage.map(t=>{
       let liste=ds.filter(d=>d.datum===t);
       if(uiFilter) liste=liste.filter(d=>bereichVonDienst(d)===uiFilter);
@@ -436,7 +453,7 @@ function planView(admin){
       return `<div class="daybox">
         <div class="dayhead ${t===heute()?"today":""}">
           <b>${dLabel(t)}${t===heute()?" · heute":""}</b>
-          ${admin?`<button class="mini" data-act="dienst-new" data-datum="${t}">+ Dienst</button>`:""}
+          <button class="mini" data-act="dienst-new" data-datum="${t}">+ Dienst</button>
         </div>
         ${block("nachmittag")}${block("abend")}
       </div>`;
@@ -448,23 +465,35 @@ function shiftRow(d,admin){
   const mine=SESSION.role==="ma"&&d.maId===SESSION.id;
   const cls=d.tausch?"free":(mine?"mine":"");
   let btn="";
-  if(admin) btn=`<button class="mini" data-act="dienst-edit" data-id="${d.id}">Ändern</button>`;
-  else if(mine&&!d.tausch&&d.datum>=heute()) btn=`<button class="mini" data-act="tausch-an" data-id="${d.id}">Tausch anbieten</button>`;
-  else if(mine&&d.tausch) btn=`<button class="mini" data-act="tausch-zurueck" data-id="${d.id}">Zurückziehen</button>`;
-  else if(!mine&&d.tausch&&d.datum>=heute()) btn=`<button class="mini" data-act="tausch-nehmen" data-id="${d.id}">Übernehmen</button>`;
+  if(admin){
+    btn=`<button class="mini" data-act="dienst-edit" data-id="${d.id}">Ändern</button>`;
+  } else if(mine){
+    btn=`<button class="mini" data-act="dienst-edit" data-id="${d.id}">Ändern</button>`
+      + (d.datum>=heute()
+          ? (d.tausch?`<button class="mini" data-act="tausch-zurueck" data-id="${d.id}">Zurückziehen</button>`
+                     :`<button class="mini" data-act="tausch-an" data-id="${d.id}">Tausch anbieten</button>`)
+          : "");
+  } else if(d.tausch&&d.datum>=heute()){
+    btn=`<button class="mini" data-act="tausch-nehmen" data-id="${d.id}">Übernehmen</button>`;
+  }
   return `<div class="shift ${cls}">
     <span><span class="t">${esc(m.name)}</span>
       <span class="tag">${esc(bereichVonDienst(d))}</span>
       ${d.tausch?`<span class="tag" style="background:#fff0d0;color:#7a5a10">Tausch frei</span>`:""}
       ${d.notiz?`<span class="tag">${esc(d.notiz)}</span>`:""}</span>
-    ${btn}</div>`;
+    <span class="btns">${btn}</span></div>`;
 }
 function dienstFormular(){
+  const admin=SESSION.role==="admin";
   const d=editDienstId?DATA.dienste[editDienstId]:null;
+  const eigen=!admin&&d&&d.maId!==SESSION.id;
+  if(eigen) return `<div class="card"><p class="muted">Diesen Dienst hat jemand anderes. Ändern kann ihn nur die Leitung – oder du übernimmst ihn, wenn er zum Tausch angeboten wird.</p>
+    <button class="btn ghost" data-act="dienst-abbruch">Zurück</button></div>`;
   return `<div class="card">
     <h2>${d?"Dienst ändern":"Dienst eintragen"}</h2>
-    <label for="d_ma">Mitarbeiter</label>
-    <select id="d_ma">${maList().map(m=>`<option value="${m.id}" ${d&&d.maId===m.id?"selected":""}>${esc(m.name)}${bereichText(m)?" · "+esc(bereichText(m)):""}</option>`).join("")}</select>
+    ${admin?`<label for="d_ma">Mitarbeiter</label>
+    <select id="d_ma">${maList().map(m=>`<option value="${m.id}" ${d&&d.maId===m.id?"selected":""}>${esc(m.name)}${bereichText(m)?" · "+esc(bereichText(m)):""}</option>`).join("")}</select>`
+    :`<p class="hint">Für dich: <b>${esc((DATA.mitarbeiter[SESSION.id]||{}).name||"")}</b></p>`}
     <label for="d_bereich">Bereich an diesem Tag</label>
     <select id="d_bereich">${PLAN_BEREICHE.map(b=>`<option ${(d?bereichVonDienst(d):"")===b?"selected":""}>${b}</option>`).join("")}</select>
     <label for="d_datum">Datum</label>
@@ -565,7 +594,7 @@ function tauschView(){
 /* ---------- Leitung ---------- */
 function adminUeb(){
   const mk=monatKey(monthOffset);
-  const rows=maList().map(m=>{ const mm=monatMin(m.id,mk); return {m,mm,lohn:std(mm)*lohnVon(m.id)}; });
+  const rows=maList().map(m=>{ const mm=monatMin(m.id,mk); return {m,mm,lohn:kostenVon(m.id,mm),fest:istFest(m.id)}; });
   rows.sort((a,b)=>{
     if(uiSortUeb==="stunden") return b.mm-a.mm;
     if(uiSortUeb==="kosten")  return b.lohn-a.lohn;
@@ -573,7 +602,8 @@ function adminUeb(){
     return (a.m.name||"").localeCompare(b.m.name||"");
   });
   const gesStd=rows.reduce((s,r)=>s+r.mm,0), gesLohn=rows.reduce((s,r)=>s+r.lohn,0);
-  const satz=abgSatz(), abgaben=gesLohn*satz/100;
+  const abgaben=rows.reduce((s,r)=>s+r.lohn*satzVon(r.m.id)/100,0);
+  const anzFest=rows.filter(r=>r.fest).length;
   return `
   <div class="navmonth">
     <button class="mini" data-act="month" data-d="-1">‹</button><b>${monatLabel(monthOffset)}</b>
@@ -583,10 +613,10 @@ function adminUeb(){
     <div class="sum">
       <div><b>${num(std(gesStd))}</b><span>Stunden gesamt</span></div>
       <div><b>${eur(gesLohn)}</b><span>Bruttolohn</span></div>
-      <div><b>${eur(abgaben)}</b><span>Abgaben ${num(satz,0)} %</span></div>
+      <div><b>${eur(abgaben)}</b><span>Abgaben ${num(abgSatz(),0)} % / ${num(abgFest(),0)} %</span></div>
       <div><b>${eur(gesLohn+abgaben)}</b><span>Kosten gesamt</span></div>
     </div>
-    <p class="hint">Hochrechnung aus den erfassten Zeiten dieses Monats.</p>
+    <p class="hint">Hochrechnung aus den erfassten Zeiten dieses Monats.${anzFest?` Davon ${anzFest} fest angestellt – dort zählt das Monatsgehalt, nicht die Stundenzahl.`:""}</p>
   </div>
   <div class="card sortbar">
     <label for="sort_ueb">Sortieren nach</label>
@@ -600,12 +630,12 @@ function adminUeb(){
   <div class="card flat"><ul class="list">
     ${rows.length===0?`<li><div class="main"><span>Noch keine Mitarbeiter angelegt.</span></div></li>`:
     rows.map(r=>{
-      const g=r.m.minijob!==false;
+      const g=r.m.minijob!==false&&!r.fest;
       const amp=!g?"":(r.lohn>MINIJOB_GRENZE?"r":(r.lohn>MINIJOB_GRENZE*0.9?"y":"g"));
       return `<li data-act="detail" data-id="${r.m.id}" style="cursor:pointer">
         <div class="main"><b>${amp?`<span class="dot ${amp}"></span>`:""}${esc(r.m.name)}</b>
           <span>${esc(bereichText(r.m))}${g?` · Grenze ${MINIJOB_GRENZE} €`:""}</span></div>
-        <div class="val">${num(std(r.mm))} Std<small>${eur(r.lohn)}</small></div></li>`;
+        <div class="val">${num(std(r.mm))} Std<small>${eur(r.lohn)}${r.fest?" fest":""}</small></div></li>`;
     }).join("")}
   </ul></div>
   <button class="btn sec" data-act="csv">CSV-Export ${monatLabel(monthOffset)}</button>
@@ -615,7 +645,7 @@ function adminDetail(){
   const m=DATA.mitarbeiter[detailId]; if(!m){ detailId=null; return adminUeb(); }
   const mk=monatKey(monthOffset);
   const zs=zeitList().filter(z=>z.maId===detailId&&z.datum.startsWith(mk)).sort((a,b)=>a.datum.localeCompare(b.datum)||min(a.von)-min(b.von));
-  const summe=zs.reduce((s,z)=>s+netto(z),0), lohn=std(summe)*lohnVon(detailId);
+  const summe=zs.reduce((s,z)=>s+netto(z),0), lohn=kostenVon(detailId,summe), fest=istFest(detailId);
   const z=editZeitId?DATA.zeiten[editZeitId]:null;
   return `
   <button class="mini" data-act="detail-zu">‹ Zurück zur Übersicht</button>
@@ -626,9 +656,9 @@ function adminDetail(){
   </div>
   <div class="card"><div class="sum">
     <div><b>${num(std(summe))}</b><span>Stunden</span></div>
-    <div><b>${eur(lohn)}</b><span>Bruttolohn</span></div>
-    <div><b>${eur(lohn*abgSatz()/100)}</b><span>Abgaben</span></div>
-    <div><b>${eur(lohn*(1+abgSatz()/100))}</b><span>Kosten</span></div>
+    <div><b>${eur(lohn)}</b><span>${fest?"Monatsgehalt":"Bruttolohn"}</span></div>
+    <div><b>${eur(lohn*satzVon(detailId)/100)}</b><span>Abgaben</span></div>
+    <div><b>${eur(lohn*(1+satzVon(detailId)/100))}</b><span>Kosten</span></div>
   </div></div>
   <div class="card flat"><ul class="list">
     ${zs.length===0?`<li><div class="main"><span>Keine Zeiten in diesem Monat.</span></div></li>`:
@@ -656,6 +686,7 @@ function adminMa(){
   const e=uiEditMa?DATA.mitarbeiter[uiEditMa]:null;
   const sel=e?bereicheVon(e):[];
   if(!e&&!uiNeuerCode) uiNeuerCode=freierCode();
+  const fest=e?istFest(uiEditMa):false;
   const liste=maList().slice().sort((a,b)=>{
     if(uiSortMa==="bereich") return (bereicheVon(a)[0]||"").localeCompare(bereicheVon(b)[0]||"")||a.name.localeCompare(b.name);
     if(uiSortMa==="code") return (codeVon(a.id)||"").localeCompare(codeVon(b.id)||"");
@@ -670,11 +701,16 @@ function adminMa(){
     <div class="row">
       <div><label for="m_code">Zugangscode ${e?"":"(automatisch vergeben)"}</label>
         <input id="m_code" inputmode="numeric" maxlength="4" value="${e?esc(codeVon(uiEditMa)):esc(uiNeuerCode)}" placeholder="4821"></div>
-      <div><label for="m_lohn">Stundenlohn €</label>
-        <input id="m_lohn" type="number" step="0.01" inputmode="decimal" value="${e?esc(lohnVon(uiEditMa)||""):""}" placeholder="13.50"></div>
+      <div><label for="m_art">Abrechnung</label>
+        <select id="m_art">
+          <option value="stunde" ${fest?"":"selected"}>Stundenlohn</option>
+          <option value="monat" ${fest?"selected":""}>Festgehalt</option>
+        </select></div>
     </div>
+    <label for="m_lohn">${fest?"Monatsgehalt brutto €":"Stundenlohn €"}</label>
+    <input id="m_lohn" type="number" step="0.01" inputmode="decimal" value="${e?esc((fest?gehaltVon(uiEditMa):lohnVon(uiEditMa))||""):""}" placeholder="${fest?"2400.00":"13.50"}">
     <label style="display:flex;gap:8px;align-items:center;margin-top:12px">
-      <input type="checkbox" id="m_mj" style="width:auto" ${!e||e.minijob!==false?"checked":""}> Minijob (Grenze ${MINIJOB_GRENZE} € überwachen)
+      <input type="checkbox" id="m_mj" style="width:auto" ${(!e||e.minijob!==false)&&!fest?"checked":""}> Minijob (Grenze ${MINIJOB_GRENZE} € überwachen)
     </label>
     ${e?"":`<button class="linkbtn" data-act="code-neu">Anderen Code vorschlagen</button>`}
     <button class="btn" data-act="ma-save" data-id="${uiEditMa}" ${BUSY?"disabled":""}>${BUSY?"Zugang wird angelegt …":(e?"Änderung speichern":"Mitarbeiter anlegen")}</button>
@@ -691,7 +727,7 @@ function adminMa(){
   <div class="card flat"><ul class="list">
     ${liste.length===0?`<li><div class="main"><span>Noch niemand angelegt.</span></div></li>`:
     liste.map(m=>`<li>
-      <div class="main"><b>${esc(m.name)}</b><span>${esc(bereichText(m))} · Code ${esc(codeVon(m.id)||"–")} · ${lohnVon(m.id)?eur(lohnVon(m.id))+"/Std":"kein Lohn hinterlegt"}</span></div>
+      <div class="main"><b>${esc(m.name)}</b><span>${esc(bereichText(m))} · Code ${esc(codeVon(m.id)||"–")} · ${istFest(m.id)?(gehaltVon(m.id)?eur(gehaltVon(m.id))+"/Monat":"kein Gehalt hinterlegt"):(lohnVon(m.id)?eur(lohnVon(m.id))+"/Std":"kein Lohn hinterlegt")}</span></div>
       <div class="val"><button class="mini" data-act="ma-edit" data-id="${m.id}">ändern</button>
         <button class="mini warn" data-act="ma-del" data-id="${m.id}">löschen</button></div></li>`).join("")}
   </ul></div>
@@ -712,8 +748,16 @@ function adminSet(){
     <h2>Abgaben</h2>
     <label for="s_abg">Pauschalabgaben in Prozent</label>
     <input id="s_abg" type="number" step="0.5" inputmode="decimal" value="${esc(abgSatz())}">
-    <p class="hint">Voreingestellt 32 % für Minijobs: Kranken- und Rentenversicherung, Umlagen und Pauschsteuer.</p>
+    <label for="s_abg_fest">Abgaben Festangestellte in Prozent</label>
+    <input id="s_abg_fest" type="number" step="0.5" inputmode="decimal" value="${esc(abgFest())}">
+    <p class="hint">Voreingestellt 32 % für Minijobs (Pauschalabgaben) und 21 % für Festangestellte (Arbeitgeberanteil). Beides sind Richtwerte – frag im Zweifel deinen Steuerberater nach den Sätzen für deinen Betrieb.</p>
     <button class="btn" data-act="set-save">Speichern</button>
+  </div>
+  <div class="card">
+    <h2>Öffnungstage</h2>
+    <p class="hint">Nur diese Tage erscheinen im Dienstplan. Tage mit bereits eingetragenen Diensten bleiben trotzdem sichtbar.</p>
+    <div class="chips">${WOCHE.map(w=>`<label class="chip"><input type="checkbox" class="s_tag" value="${w[0]}" ${tageOffen().indexOf(w[0])>=0?"checked":""}><span>${w[1]}</span></label>`).join("")}</div>
+    <button class="btn" data-act="tage-save">Öffnungstage speichern</button>
   </div>
   <div class="card">
     <h2>Daten sichern</h2>
@@ -745,9 +789,10 @@ document.addEventListener("click", ev=>{
 
   if(a==="dienst-new"){ uiNewDate=el.dataset.datum; editDienstId=null; render(); scrollTo_("d_datum"); return; }
   if(a==="dienst-edit"){ editDienstId=id; render(); scrollTo_("d_datum"); return; }
+  if(a==="dienst-zurueck"){ editDienstId=null; return render(); }
   if(a==="dienst-abbruch"){ editDienstId=null; return render(); }
   if(a==="dienst-save") return dienstSave();
-  if(a==="dienst-del"){ if(confirm("Diesen Dienst löschen?")){ editDienstId=null; del("dienste/"+id); render(); } return; }
+  if(a==="dienst-del") return dienstDel(id);
 
   if(a==="tausch-an"){ save("dienste/"+id+"/tausch",true); return render(); }
   if(a==="tausch-zurueck"){ save("dienste/"+id+"/tausch",false); return render(); }
@@ -769,6 +814,7 @@ document.addEventListener("click", ev=>{
   if(a==="ma-del") return maDel(id);
   if(a==="hin-del"){ del("hinweise/"+id); return render(); }
   if(a==="set-save") return setSave();
+  if(a==="tage-save") return tageSave();
   if(a==="pw-save") return pwSave();
   if(a==="csv") return csvExport();
   if(a==="print") return printZettel(id);
@@ -788,17 +834,37 @@ document.addEventListener("keydown", ev=>{
 function scrollTo_(elId){ const f=document.getElementById(elId); if(f) f.scrollIntoView({block:"center"}); }
 
 function dienstSave(){
-  const maId=document.getElementById("d_ma").value, datum=document.getElementById("d_datum").value;
+  const admin=SESSION.role==="admin";
+  const maId=admin?document.getElementById("d_ma").value:SESSION.id;
+  const datum=document.getElementById("d_datum").value;
   const schicht=document.getElementById("d_schicht").value;
   const bereich=document.getElementById("d_bereich").value;
   const notiz=document.getElementById("d_notiz").value.trim();
   if(!maId||!datum){ setFlash("err","Bitte Mitarbeiter und Datum auswählen."); return render(); }
   const alt=editDienstId?DATA.dienste[editDienstId]:null;
+  if(alt&&!admin&&alt.maId!==SESSION.id){ setFlash("err","Diesen Dienst kannst du nicht ändern."); editDienstId=null; return render(); }
   const obj={maId,datum,schicht,bereich,notiz,tausch:alt?!!alt.tausch:false};
   const id=editDienstId||uid();
   editDienstId=null; uiNewDate=datum;
   save("dienste/"+id,obj);
+  if(!admin&&alt&&(alt.datum!==datum||schichtVon(alt)!==schicht||bereichVonDienst(alt)!==bereich)){
+    const n=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
+    save("hinweise/"+uid(),{text:`Dienst geändert: ${n} – vorher ${dLabel(alt.datum)} ${SCHICHT_NAME[schichtVon(alt)]} ${bereichVonDienst(alt)}, jetzt ${dLabel(datum)} ${SCHICHT_NAME[schicht]} ${bereich}.`, ts:Date.now()});
+  }
   setFlash("ok","Dienst gespeichert."); render();
+}
+function dienstDel(id){
+  const d=DATA.dienste[id]; if(!d) return;
+  const admin=SESSION.role==="admin";
+  if(!admin&&d.maId!==SESSION.id){ setFlash("err","Diesen Dienst kannst du nicht löschen."); return render(); }
+  if(!confirm("Diesen Dienst löschen?")) return;
+  editDienstId=null;
+  del("dienste/"+id);
+  if(!admin){
+    const n=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
+    save("hinweise/"+uid(),{text:`Dienst gelöscht: ${n} am ${dLabel(d.datum)} (${SCHICHT_NAME[schichtVon(d)]}, ${bereichVonDienst(d)}).`, ts:Date.now()});
+  }
+  render();
 }
 function tauschNehmen(id){
   const d=DATA.dienste[id]; if(!d) return;
@@ -850,7 +916,8 @@ async function maSave(id){
   const name=document.getElementById("m_name").value.trim();
   const bereiche=Array.prototype.slice.call(document.querySelectorAll(".m_ber:checked")).map(x=>x.value);
   const code=document.getElementById("m_code").value.trim();
-  const lohn=document.getElementById("m_lohn").value;
+  const betrag=Number(document.getElementById("m_lohn").value||0);
+  const artFest=document.getElementById("m_art").value==="monat";
   const minijob=document.getElementById("m_mj").checked;
   if(!name){ setFlash("err","Bitte einen Namen eintragen."); return render(); }
   if(!/^\d{4}$/.test(code)){ setFlash("err","Der Zugangscode muss aus genau 4 Ziffern bestehen."); return render(); }
@@ -864,9 +931,9 @@ async function maSave(id){
       await fs.collection(COLL.uidmap).doc(neueUid).set({maId});
       const alteUid=(DATA.privat[maId]||{}).authUid;
       if(alteUid&&alteUid!==neueUid){ try{ await fs.collection(COLL.uidmap).doc(alteUid).delete(); }catch(e){} }
-      save("privat/"+maId,{code,lohn:Number(lohn||0),authUid:neueUid});
+      save("privat/"+maId,{code,fest:artFest,lohn:artFest?0:betrag,gehalt:artFest?betrag:0,authUid:neueUid});
     }else{
-      save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,lohn:Number(lohn||0)}));
+      save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,fest:artFest,lohn:artFest?0:betrag,gehalt:artFest?betrag:0}));
     }
     save("mitarbeiter/"+maId,{name,bereiche,minijob});
     uiEditMa=""; uiNeuerCode="";
@@ -884,8 +951,15 @@ async function maDel(id){
 }
 function setSave(){
   const abg=Number(document.getElementById("s_abg").value);
-  save("meta",Object.assign({},DATA.meta,{abgaben:isNaN(abg)?DEFAULT_ABGABEN:abg}));
+  const abgF=Number(document.getElementById("s_abg_fest").value);
+  save("meta",Object.assign({},DATA.meta,{abgaben:isNaN(abg)?DEFAULT_ABGABEN:abg, abgabenFest:isNaN(abgF)?DEFAULT_ABGABEN_FEST:abgF}));
   setFlash("ok","Gespeichert."); render();
+}
+function tageSave(){
+  const tage=Array.prototype.slice.call(document.querySelectorAll(".s_tag:checked")).map(x=>Number(x.value));
+  if(!tage.length){ setFlash("err","Mindestens ein Tag muss offen sein."); return render(); }
+  save("kalender",{tage});
+  setFlash("ok","Öffnungstage gespeichert."); render();
 }
 function pwSave(){
   const pw=document.getElementById("s_pw").value;
@@ -902,8 +976,9 @@ function csvExport(){
   const rows=[["Mitarbeiter","Bereich","Datum","Von","Bis","Pause Min","Stunden","Stundenlohn","Betrag"]];
   zeitList().filter(z=>z.datum.startsWith(mk)).sort((a,b)=>a.datum.localeCompare(b.datum)).forEach(z=>{
     const m=DATA.mitarbeiter[z.maId]||{name:"unbekannt"};
-    const h=std(netto(z)), l=lohnVon(z.maId);
-    rows.push([m.name,bereichText(m),dParse(z.datum).toLocaleDateString("de-DE"),z.von,z.bis,z.pause||0,num(h),num(l),num(h*l)]);
+    const h=std(netto(z)), f=istFest(z.maId), l=lohnVon(z.maId);
+    rows.push([m.name,bereichText(m),dParse(z.datum).toLocaleDateString("de-DE"),z.von,z.bis,z.pause||0,num(h),
+      f?"Festgehalt":num(l), f?"":num(h*l)]);
   });
   const csv="\uFEFF"+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\r\n");
   lade(new Blob([csv],{type:"text/csv"}),"stunden_"+mk+".csv");
