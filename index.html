@@ -143,8 +143,7 @@ const BEREICHE = ["Service","Theke","Küche","Spüle","Reinigung","Büro","Sprin
 const PLAN_BEREICHE = ["Service","Theke","Küche","Spüle","Springer"];   // nur diese im Dienstplan
 const SCHICHT_NAME = {nachmittag:"Nachmittag", abend:"Abend", beide:"Nachmittag + Abend"};
 const DEFAULT_ABGABEN = 32;        // Minijob pauschal
-const DEFAULT_ABGABEN_FEST = 21;   // Arbeitgeberanteil bei Festanstellung
-const MINIJOB_GRENZE = 556;
+const MINIJOB_GRENZE = 603;   // Stand 2026, in den Einstellungen änderbar
 </script>
 
 <script>
@@ -161,6 +160,7 @@ let uiSortUeb="name", uiSortMa="name", uiNeuerCode="";
 let flash=null, flashT=null, unsubs=[];
 
 function setFlash(t,m){ flash={t,m}; clearTimeout(flashT); flashT=setTimeout(()=>{flash=null;render();},5000); }
+function setFest(t,m){ flash={t,m}; clearTimeout(flashT); }   // bleibt stehen, bis etwas anderes passiert
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function fehler(e){ setFlash("err", fbText(e)); }
 function fbText(e){
@@ -252,14 +252,21 @@ function pinLogin(){
   if(!/^\d{4}$/.test(v)) return setFlash("err","Bitte den vierstelligen Code eingeben.");
   BUSY=true; render();
   auth.signInWithEmailAndPassword("code"+v+PIN_DOMAIN, v+PIN_SALT)
-    .catch(e=>{ BUSY=false; fehler(e); render(); });
+    .catch(e=>{ BUSY=false; setFest("err",fbText(e)); render(); });
 }
 function leitungLogin(){
   const m=(document.getElementById("l_mail").value||"").trim();
   const p=document.getElementById("l_pw").value||"";
   if(!m||!p) return setFlash("err","Bitte E-Mail und Passwort eingeben.");
   BUSY=true; render();
-  auth.signInWithEmailAndPassword(m,p).catch(e=>{ BUSY=false; fehler(e); render(); });
+  auth.signInWithEmailAndPassword(m,p).catch(e=>{ BUSY=false; setFest("err",fbText(e)); render(); });
+}
+function pwReset(){
+  const m=(document.getElementById("l_mail").value||"").trim();
+  if(!m) return setFest("err","Bitte zuerst die E-Mail-Adresse eintragen, dann nochmal tippen.");
+  auth.sendPasswordResetEmail(m)
+    .then(()=>{ setFest("ok","Mail ist unterwegs an "+m+". Der Link darin setzt das Passwort neu. Schau auch im Spam-Ordner nach."); render(); })
+    .catch(e=>{ setFest("err",fbText(e)); render(); });
 }
 function zweitApp(){
   const vorhanden = firebase.apps.filter(a=>a.name==="anlegen")[0];
@@ -298,6 +305,7 @@ function std(m){ return m/60; }
 function eur(n){ return n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})+" €"; }
 function num(n,k){ k=(k===undefined?2:k); return n.toLocaleString("de-DE",{minimumFractionDigits:k,maximumFractionDigits:k}); }
 function pflichtPause(netto){ return netto>540?45:(netto>360?30:0); }
+function autoPause(brutto){ return brutto<=360?0:(brutto<=570?30:45); }   // 6 h / 9 h Grenze
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function monatKey(off){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()+off); return d.getFullYear()+"-"+pad(d.getMonth()+1); }
 function monatLabel(off){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()+off); return MON[d.getMonth()]+" "+d.getFullYear(); }
@@ -312,12 +320,12 @@ function bereicheVon(m){
 }
 function bereichText(m){ return bereicheVon(m).join(" · "); }
 function imPlan(m){ return bereicheVon(m).some(b=>PLAN_BEREICHE.indexOf(b)>=0); }
-function schichtVon(d){
-  if(d.schicht) return d.schicht;
-  if(d.von) return min(d.von)<16*60 ? "nachmittag" : "abend";   // alte Dienste mit Uhrzeit
-  return "abend";
+function dienstZeit(d){ return d.von || ""; }
+function dienstLabel(d){
+  if(d.von) return "ab "+d.von;
+  return SCHICHT_NAME[d.schicht]||"Abend";        // alte Einträge ohne Uhrzeit
 }
-function hatSchicht(d,s){ const x=schichtVon(d); return x===s||x==="beide"; }
+function dienstSort(d){ return d.von?min(d.von):(d.schicht==="nachmittag"?840:1020); }
 function bereichVonDienst(d){ return d.bereich || bereicheVon(DATA.mitarbeiter[d.maId])[0] || ""; }
 function maList(){ return Object.keys(DATA.mitarbeiter).map(id=>Object.assign({id},DATA.mitarbeiter[id]))
   .sort((a,b)=>(bereicheVon(a)[0]||"").localeCompare(bereicheVon(b)[0]||"")||(a.name||"").localeCompare(b.name||"")); }
@@ -326,14 +334,12 @@ function dienstList(){ return Object.keys(DATA.dienste).map(id=>Object.assign({i
 function netto(z){ return Math.max(0, dauer(z.von,z.bis)-(z.pause||0)); }
 function monatMin(maId,mk){ return zeitList().filter(z=>z.maId===maId&&z.datum.startsWith(mk)).reduce((s,z)=>s+netto(z),0); }
 function lohnVon(maId){ return Number((DATA.privat[maId]||{}).lohn||0); }
-function gehaltVon(maId){ return Number((DATA.privat[maId]||{}).gehalt||0); }
 function istFest(maId){ return !!(DATA.privat[maId]||{}).fest; }
-function kostenVon(maId,minuten){ return istFest(maId) ? gehaltVon(maId) : std(minuten)*lohnVon(maId); }
-function satzVon(maId){ return istFest(maId) ? abgFest() : abgSatz(); }
+function kostenVon(maId,minuten){ return istFest(maId) ? 0 : std(minuten)*lohnVon(maId); }
 function tageOffen(){ return Array.isArray(DATA.kalender.tage) ? DATA.kalender.tage : STD_TAGE; }
 function codeVon(maId){ return (DATA.privat[maId]||{}).code||""; }
 function abgSatz(){ return DATA.meta.abgaben===undefined?DEFAULT_ABGABEN:Number(DATA.meta.abgaben); }
-function abgFest(){ return DATA.meta.abgabenFest===undefined?DEFAULT_ABGABEN_FEST:Number(DATA.meta.abgabenFest); }
+function grenze(){ return DATA.meta.grenze===undefined?MINIJOB_GRENZE:Number(DATA.meta.grenze); }
 function nachtragOK(datum){ return datum===heute()||datum===gestern(); }
 function codeBelegt(c){ return maList().some(m=>codeVon(m.id)===c); }
 function langweilig(c){
@@ -405,6 +411,7 @@ function loginView(){
       <label for="l_mail">E-Mail</label><input id="l_mail" type="email" autocomplete="username" placeholder="leitung@landgasthof.local">
       <label for="l_pw">Passwort</label><input id="l_pw" type="password" autocomplete="current-password">
       <button class="btn" data-act="leitung-login" ${BUSY?"disabled":""}>${BUSY?"Moment …":"Anmelden"}</button>
+      <button class="linkbtn" data-act="pw-reset">Passwort vergessen – Mail anfordern</button>
       <button class="linkbtn" data-act="zum-pin">Zurück zur Code-Eingabe</button>
     </div>`:`
     <div class="card center">
@@ -443,19 +450,15 @@ function planView(admin){
     ${tage.map(t=>{
       let liste=ds.filter(d=>d.datum===t);
       if(uiFilter) liste=liste.filter(d=>bereichVonDienst(d)===uiFilter);
-      const block=s=>{
-        const l=liste.filter(d=>hatSchicht(d,s)).sort((a,b)=>
-          bereichVonDienst(a).localeCompare(bereichVonDienst(b))||
-          ((DATA.mitarbeiter[a.maId]||{}).name||"").localeCompare((DATA.mitarbeiter[b.maId]||{}).name||""));
-        return `<div class="schicht"><span class="schichtname">${SCHICHT_NAME[s]}</span>
-          ${l.length===0?`<span class="muted">niemand eingeteilt</span>`:l.map(d=>shiftRow(d,admin)).join("")}</div>`;
-      };
+      liste.sort((a,b)=>dienstSort(a)-dienstSort(b)||
+        bereichVonDienst(a).localeCompare(bereichVonDienst(b))||
+        ((DATA.mitarbeiter[a.maId]||{}).name||"").localeCompare((DATA.mitarbeiter[b.maId]||{}).name||""));
       return `<div class="daybox">
         <div class="dayhead ${t===heute()?"today":""}">
           <b>${dLabel(t)}${t===heute()?" · heute":""}</b>
           <button class="mini" data-act="dienst-new" data-datum="${t}">+ Dienst</button>
         </div>
-        ${block("nachmittag")}${block("abend")}
+        ${liste.length===0?`<span class="muted">niemand eingeteilt</span>`:liste.map(d=>shiftRow(d,admin)).join("")}
       </div>`;
     }).join("")}
   </div>`;
@@ -477,7 +480,7 @@ function shiftRow(d,admin){
     btn=`<button class="mini" data-act="tausch-nehmen" data-id="${d.id}">Übernehmen</button>`;
   }
   return `<div class="shift ${cls}">
-    <span><span class="t">${esc(m.name)}</span>
+    <span><span class="t">${esc(dienstLabel(d))}</span> ${esc(m.name)}
       <span class="tag">${esc(bereichVonDienst(d))}</span>
       ${d.tausch?`<span class="tag" style="background:#fff0d0;color:#7a5a10">Tausch frei</span>`:""}
       ${d.notiz?`<span class="tag">${esc(d.notiz)}</span>`:""}</span>
@@ -498,8 +501,8 @@ function dienstFormular(){
     <select id="d_bereich">${PLAN_BEREICHE.map(b=>`<option ${(d?bereichVonDienst(d):"")===b?"selected":""}>${b}</option>`).join("")}</select>
     <label for="d_datum">Datum</label>
     <input type="date" id="d_datum" value="${d?d.datum:(uiNewDate||heute())}">
-    <label for="d_schicht">Schicht</label>
-    <select id="d_schicht">${Object.keys(SCHICHT_NAME).map(k=>`<option value="${k}" ${(d?schichtVon(d):"abend")===k?"selected":""}>${SCHICHT_NAME[k]}</option>`).join("")}</select>
+    <label for="d_von">Beginn</label>
+    <input type="time" id="d_von" value="${d?dienstZeit(d):"17:00"}">
     <label for="d_notiz">Notiz (optional)</label>
     <input id="d_notiz" value="${d?esc(d.notiz||""):""}" placeholder="z. B. Hochzeit Saal">
     <button class="btn" data-act="dienst-save">${d?"Änderung speichern":"Dienst speichern"}</button>
@@ -524,12 +527,19 @@ function zeitForm(){
       <div><label for="z_bis">Bis</label><input type="time" id="z_bis" value="${z?z.bis:""}" data-live></div>
     </div>
     <label for="z_pause">Pause in Minuten</label>
-    <input type="number" id="z_pause" min="0" step="5" inputmode="numeric" value="${z?(z.pause||0):0}" data-live>
+    <input type="number" id="z_pause" min="0" step="5" inputmode="numeric" value="${z?(z.pause||0):0}" data-live data-pause>
     <p class="hint" id="calc">Ab mehr als 6 Stunden Arbeitszeit sind 30 Minuten Pause Pflicht, ab mehr als 9 Stunden 45 Minuten.</p>
     <button class="btn" data-act="zeit-save">${z?"Korrektur speichern":"Zeit speichern"}</button>
     ${z?`<button class="btn ghost" data-act="zeit-abbruch">Abbrechen</button>`:""}
     <p class="hint">Ein Dienst über Mitternacht zählt zu dem Tag, an dem er begonnen hat. Ändern kannst du nur heute und gestern.</p>
   </div>`;
+}
+function pauseSetzen(){
+  const v=document.getElementById("z_von"), b=document.getElementById("z_bis"), p=document.getElementById("z_pause");
+  if(!v||!b||!p||!v.value||!b.value) return;
+  const soll=autoPause(dauer(v.value,b.value));
+  if(Number(p.value||0)<soll) p.value=soll;          // kleinere Werte werden angehoben
+  if(soll===0&&!p.dataset.selbst) p.value=0;
 }
 function liveCalc(){
   const el=document.getElementById("calc"); if(!el) return;
@@ -537,7 +547,25 @@ function liveCalc(){
   const p=Number(document.getElementById("z_pause").value||0);
   if(!v||!b){ el.textContent="Ab mehr als 6 Stunden Arbeitszeit sind 30 Minuten Pause Pflicht, ab mehr als 9 Stunden 45 Minuten."; return; }
   const br=dauer(v,b), ne=Math.max(0,br-p), soll=pflichtPause(ne);
-  el.innerHTML=`Anwesend ${hhmm(br)} Std, Pause ${p} Min, <b>Arbeitszeit ${hhmm(ne)} Std</b>`+(soll>p?` <span style="color:var(--bad)">– mindestens ${soll} Minuten Pause nötig</span>`:"");
+  let html=`Anwesend ${hhmm(br)} Std, Pause ${p} Min, <b>Arbeitszeit ${hhmm(ne)} Std</b>`
+    +(soll>p?` <span style="color:var(--bad)">– mindestens ${soll} Minuten Pause nötig</span>`:"");
+  const ext=pflichtPause(br);
+  if(ext>0){
+    const neuesEnde=zeitText(min(v)+br+ext);
+    html+=`<br><span style="color:var(--accent)">Die Pause wird abgezogen. Wenn du ${hhmm(br)} Std arbeiten wolltest, muss das Ende ${ext} Minuten später stehen.</span>
+      <br><button class="mini" data-act="ende-plus" style="margin-top:6px">Ende auf ${neuesEnde} setzen</button>`;
+  }
+  el.innerHTML=html;
+}
+function zeitText(m){ m=((m%1440)+1440)%1440; return pad(Math.floor(m/60))+":"+pad(m%60); }
+function endePlus(){
+  const v=document.getElementById("z_von"), b=document.getElementById("z_bis"), p=document.getElementById("z_pause");
+  if(!v||!b||!v.value||!b.value) return;
+  const br=dauer(v.value,b.value), ext=pflichtPause(br);
+  if(!ext) return;
+  b.value=zeitText(min(v.value)+br+ext);
+  p.value=ext;
+  liveCalc();
 }
 
 function meineStunden(){
@@ -572,7 +600,7 @@ function tauschView(){
     <h2>Freie Dienste zum Übernehmen</h2>
     ${offen.length===0?`<p class="muted">Gerade bietet niemand einen Dienst an.</p>`:
       offen.map(d=>`<div class="shift free">
-        <span><span class="t">${dLabel(d.datum)} · ${SCHICHT_NAME[schichtVon(d)]}</span> ${esc((DATA.mitarbeiter[d.maId]||{}).name||"")}
+        <span><span class="t">${dLabel(d.datum)} · ${dienstLabel(d)}</span> ${esc((DATA.mitarbeiter[d.maId]||{}).name||"")}
         <span class="tag">${esc(bereichVonDienst(d))}</span></span>
         ${d.maId===SESSION.id?`<button class="mini" data-act="tausch-zurueck" data-id="${d.id}">Zurückziehen</button>`
           :`<button class="mini" data-act="tausch-nehmen" data-id="${d.id}">Übernehmen</button>`}
@@ -582,7 +610,7 @@ function tauschView(){
     <h2>Meine nächsten Dienste</h2>
     ${meine.length===0?`<p class="muted">Für dich ist aktuell kein Dienst eingetragen.</p>`:
       meine.map(d=>`<div class="shift mine">
-        <span><span class="t">${dLabel(d.datum)} · ${SCHICHT_NAME[schichtVon(d)]}</span>
+        <span><span class="t">${dLabel(d.datum)} · ${dienstLabel(d)}</span>
         <span class="tag">${esc(bereichVonDienst(d))}</span></span>
         ${d.tausch?`<button class="mini" data-act="tausch-zurueck" data-id="${d.id}">Zurückziehen</button>`
           :`<button class="mini" data-act="tausch-an" data-id="${d.id}">Tausch anbieten</button>`}
@@ -602,7 +630,7 @@ function adminUeb(){
     return (a.m.name||"").localeCompare(b.m.name||"");
   });
   const gesStd=rows.reduce((s,r)=>s+r.mm,0), gesLohn=rows.reduce((s,r)=>s+r.lohn,0);
-  const abgaben=rows.reduce((s,r)=>s+r.lohn*satzVon(r.m.id)/100,0);
+  const abgaben=gesLohn*abgSatz()/100;
   const anzFest=rows.filter(r=>r.fest).length;
   return `
   <div class="navmonth">
@@ -613,10 +641,10 @@ function adminUeb(){
     <div class="sum">
       <div><b>${num(std(gesStd))}</b><span>Stunden gesamt</span></div>
       <div><b>${eur(gesLohn)}</b><span>Bruttolohn</span></div>
-      <div><b>${eur(abgaben)}</b><span>Abgaben ${num(abgSatz(),0)} % / ${num(abgFest(),0)} %</span></div>
+      <div><b>${eur(abgaben)}</b><span>Abgaben ${num(abgSatz(),0)} %</span></div>
       <div><b>${eur(gesLohn+abgaben)}</b><span>Kosten gesamt</span></div>
     </div>
-    <p class="hint">Hochrechnung aus den erfassten Zeiten dieses Monats.${anzFest?` Davon ${anzFest} fest angestellt – dort zählt das Monatsgehalt, nicht die Stundenzahl.`:""}</p>
+    <p class="hint">Hochrechnung aus den erfassten Zeiten dieses Monats, nur Minijobber.${anzFest?` ${anzFest} fest angestellte Personen sind hier nicht enthalten – bei ihnen zählt allein die Zeiterfassung.`:""}</p>
   </div>
   <div class="card sortbar">
     <label for="sort_ueb">Sortieren nach</label>
@@ -631,11 +659,11 @@ function adminUeb(){
     ${rows.length===0?`<li><div class="main"><span>Noch keine Mitarbeiter angelegt.</span></div></li>`:
     rows.map(r=>{
       const g=r.m.minijob!==false&&!r.fest;
-      const amp=!g?"":(r.lohn>MINIJOB_GRENZE?"r":(r.lohn>MINIJOB_GRENZE*0.9?"y":"g"));
+      const amp=!g?"":(r.lohn>grenze()?"r":(r.lohn>grenze()*0.9?"y":"g"));
       return `<li data-act="detail" data-id="${r.m.id}" style="cursor:pointer">
         <div class="main"><b>${amp?`<span class="dot ${amp}"></span>`:""}${esc(r.m.name)}</b>
-          <span>${esc(bereichText(r.m))}${g?` · Grenze ${MINIJOB_GRENZE} €`:""}</span></div>
-        <div class="val">${num(std(r.mm))} Std<small>${eur(r.lohn)}${r.fest?" fest":""}</small></div></li>`;
+          <span>${esc(bereichText(r.m))}${g?` · Grenze ${num(grenze(),0)} €`:""}</span></div>
+        <div class="val">${num(std(r.mm))} Std<small>${r.fest?"festangestellt":eur(r.lohn)}</small></div></li>`;
     }).join("")}
   </ul></div>
   <button class="btn sec" data-act="csv">CSV-Export ${monatLabel(monthOffset)}</button>
@@ -656,10 +684,10 @@ function adminDetail(){
   </div>
   <div class="card"><div class="sum">
     <div><b>${num(std(summe))}</b><span>Stunden</span></div>
-    <div><b>${eur(lohn)}</b><span>${fest?"Monatsgehalt":"Bruttolohn"}</span></div>
-    <div><b>${eur(lohn*satzVon(detailId)/100)}</b><span>Abgaben</span></div>
-    <div><b>${eur(lohn*(1+satzVon(detailId)/100))}</b><span>Kosten</span></div>
-  </div></div>
+    <div><b>${zs.length}</b><span>Einträge</span></div>
+    ${fest?"":`<div><b>${eur(lohn)}</b><span>Bruttolohn</span></div>
+    <div><b>${eur(lohn*(1+abgSatz()/100))}</b><span>Kosten mit Abgaben</span></div>`}
+  </div>${fest?`<p class="hint">Fest angestellt – hier werden nur die Stunden gezählt.</p>`:""}</div>
   <div class="card flat"><ul class="list">
     ${zs.length===0?`<li><div class="main"><span>Keine Zeiten in diesem Monat.</span></div></li>`:
     zs.map(x=>`<li>
@@ -704,11 +732,13 @@ function adminMa(){
       <div><label for="m_art">Abrechnung</label>
         <select id="m_art">
           <option value="stunde" ${fest?"":"selected"}>Stundenlohn</option>
-          <option value="monat" ${fest?"selected":""}>Festgehalt</option>
+          <option value="monat" ${fest?"selected":""}>Festangestellt (nur Zeiterfassung)</option>
         </select></div>
     </div>
-    <label for="m_lohn" id="m_lohn_label">${fest?"Monatsgehalt brutto €":"Stundenlohn €"}</label>
-    <input id="m_lohn" type="number" step="0.01" inputmode="decimal" value="${e?esc((fest?gehaltVon(uiEditMa):lohnVon(uiEditMa))||""):""}" placeholder="${fest?"2400.00":"13.50"}">
+    <div id="m_lohn_row" style="display:${fest?"none":"block"}">
+      <label for="m_lohn" id="m_lohn_label">Stundenlohn €</label>
+      <input id="m_lohn" type="number" step="0.01" inputmode="decimal" value="${e&&!fest?esc(lohnVon(uiEditMa)||""):""}" placeholder="13.50">
+    </div>
     <label id="m_mj_row" style="display:${fest?"none":"flex"};gap:8px;align-items:center;margin-top:12px">
       <input type="checkbox" id="m_mj" style="width:auto" ${(!e||e.minijob!==false)&&!fest?"checked":""}> Minijob (Grenze ${MINIJOB_GRENZE} € überwachen)
     </label>
@@ -727,7 +757,7 @@ function adminMa(){
   <div class="card flat"><ul class="list">
     ${liste.length===0?`<li><div class="main"><span>Noch niemand angelegt.</span></div></li>`:
     liste.map(m=>`<li>
-      <div class="main"><b>${esc(m.name)}</b><span>${esc(bereichText(m))} · Code ${esc(codeVon(m.id)||"–")} · ${istFest(m.id)?(gehaltVon(m.id)?eur(gehaltVon(m.id))+"/Monat":"kein Gehalt hinterlegt"):(lohnVon(m.id)?eur(lohnVon(m.id))+"/Std":"kein Lohn hinterlegt")}</span></div>
+      <div class="main"><b>${esc(m.name)}</b><span>${esc(bereichText(m))} · Code ${esc(codeVon(m.id)||"–")} · ${istFest(m.id)?"festangestellt":(lohnVon(m.id)?eur(lohnVon(m.id))+"/Std":"kein Lohn hinterlegt")}</span></div>
       <div class="val"><button class="mini" data-act="ma-edit" data-id="${m.id}">ändern</button>
         <button class="mini warn" data-act="ma-del" data-id="${m.id}">löschen</button></div></li>`).join("")}
   </ul></div>
@@ -739,8 +769,8 @@ function artUmschalten(){
   const feld=document.getElementById("m_lohn");
   const row=document.getElementById("m_mj_row");
   const mj=document.getElementById("m_mj");
-  if(lab) lab.textContent = fest ? "Monatsgehalt brutto €" : "Stundenlohn €";
-  if(feld) feld.placeholder = fest ? "2400.00" : "13.50";
+  const lohnRow=document.getElementById("m_lohn_row");
+  if(lohnRow) lohnRow.style.display = fest ? "none" : "block";
   if(row) row.style.display = fest ? "none" : "flex";
   if(fest&&mj) mj.checked=false;
 }
@@ -759,9 +789,9 @@ function adminSet(){
     <h2>Abgaben</h2>
     <label for="s_abg">Pauschalabgaben in Prozent</label>
     <input id="s_abg" type="number" step="0.5" inputmode="decimal" value="${esc(abgSatz())}">
-    <label for="s_abg_fest">Abgaben Festangestellte in Prozent</label>
-    <input id="s_abg_fest" type="number" step="0.5" inputmode="decimal" value="${esc(abgFest())}">
-    <p class="hint">Voreingestellt 32 % für Minijobs (Pauschalabgaben) und 21 % für Festangestellte (Arbeitgeberanteil). Beides sind Richtwerte – frag im Zweifel deinen Steuerberater nach den Sätzen für deinen Betrieb.</p>
+    <label for="s_grenze">Minijob-Grenze in Euro pro Monat</label>
+    <input id="s_grenze" type="number" step="1" inputmode="numeric" value="${esc(grenze())}">
+    <p class="hint">Stand 2026: 603 €, ab 2027 voraussichtlich 633 €. Die Grenze ist an den Mindestlohn gekoppelt und gilt pro Person, nicht pro Arbeitsverhältnis. Der Abgabensatz von 32 % ist ein Richtwert – den genauen Satz kennt dein Steuerberater.</p>
     <button class="btn" data-act="set-save">Speichern</button>
   </div>
   <div class="card">
@@ -791,6 +821,7 @@ document.addEventListener("click", ev=>{
   const a=el.dataset.act, id=el.dataset.id;
   if(a==="pin-login") return pinLogin();
   if(a==="leitung-login") return leitungLogin();
+  if(a==="pw-reset") return pwReset();
   if(a==="zur-leitung"){ uiLeitungForm=true; return render(); }
   if(a==="zum-pin"){ uiLeitungForm=false; return render(); }
   if(a==="logout"){ stopSync(); auth.signOut(); return; }
@@ -809,6 +840,7 @@ document.addEventListener("click", ev=>{
   if(a==="tausch-zurueck"){ save("dienste/"+id+"/tausch",false); return render(); }
   if(a==="tausch-nehmen") return tauschNehmen(id);
 
+  if(a==="ende-plus") return endePlus();
   if(a==="zeit-save") return zeitSave();
   if(a==="zeit-edit"){ editZeitId=id; VIEW="zeit"; return render(); }
   if(a==="zeit-abbruch"){ editZeitId=null; return render(); }
@@ -832,7 +864,10 @@ document.addEventListener("click", ev=>{
   if(a==="backup") return backup();
 });
 document.addEventListener("input", ev=>{
-  if(ev.target.matches("[data-live]")) liveCalc();
+  if(ev.target.matches("[data-live]")){
+    if(ev.target.id==="z_von"||ev.target.id==="z_bis") pauseSetzen();
+    liveCalc();
+  }
   if(ev.target.id==="bfilter"){ uiFilter=ev.target.value; render(); }
   if(ev.target.id==="sort_ueb"){ uiSortUeb=ev.target.value; render(); }
   if(ev.target.id==="sort_ma"){ uiSortMa=ev.target.value; render(); }
@@ -854,19 +889,19 @@ function dienstSave(){
   const admin=SESSION.role==="admin";
   const maId=admin?document.getElementById("d_ma").value:SESSION.id;
   const datum=document.getElementById("d_datum").value;
-  const schicht=document.getElementById("d_schicht").value;
+  const von=document.getElementById("d_von").value;
   const bereich=document.getElementById("d_bereich").value;
   const notiz=document.getElementById("d_notiz").value.trim();
-  if(!maId||!datum){ setFlash("err","Bitte Mitarbeiter und Datum auswählen."); return render(); }
+  if(!maId||!datum||!von){ setFlash("err","Bitte Mitarbeiter, Datum und Beginn angeben."); return render(); }
   const alt=editDienstId?DATA.dienste[editDienstId]:null;
   if(alt&&!admin&&alt.maId!==SESSION.id){ setFlash("err","Diesen Dienst kannst du nicht ändern."); editDienstId=null; return render(); }
-  const obj={maId,datum,schicht,bereich,notiz,tausch:alt?!!alt.tausch:false};
+  const obj={maId,datum,von,bereich,notiz,tausch:alt?!!alt.tausch:false};
   const id=editDienstId||uid();
   editDienstId=null; uiNewDate=datum;
   save("dienste/"+id,obj);
-  if(!admin&&alt&&(alt.datum!==datum||schichtVon(alt)!==schicht||bereichVonDienst(alt)!==bereich)){
+  if(!admin&&alt&&(alt.datum!==datum||dienstZeit(alt)!==von||bereichVonDienst(alt)!==bereich)){
     const n=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
-    save("hinweise/"+uid(),{text:`Dienst geändert: ${n} – vorher ${dLabel(alt.datum)} ${SCHICHT_NAME[schichtVon(alt)]} ${bereichVonDienst(alt)}, jetzt ${dLabel(datum)} ${SCHICHT_NAME[schicht]} ${bereich}.`, ts:Date.now()});
+    save("hinweise/"+uid(),{text:`Dienst geändert: ${n} – vorher ${dLabel(alt.datum)} ${dienstLabel(alt)} ${bereichVonDienst(alt)}, jetzt ${dLabel(datum)} ab ${von} ${bereich}.`, ts:Date.now()});
   }
   setFlash("ok","Dienst gespeichert."); render();
 }
@@ -879,7 +914,7 @@ function dienstDel(id){
   del("dienste/"+id);
   if(!admin){
     const n=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
-    save("hinweise/"+uid(),{text:`Dienst gelöscht: ${n} am ${dLabel(d.datum)} (${SCHICHT_NAME[schichtVon(d)]}, ${bereichVonDienst(d)}).`, ts:Date.now()});
+    save("hinweise/"+uid(),{text:`Dienst gelöscht: ${n} am ${dLabel(d.datum)} (${dienstLabel(d)}, ${bereichVonDienst(d)}).`, ts:Date.now()});
   }
   render();
 }
@@ -887,9 +922,9 @@ function tauschNehmen(id){
   const d=DATA.dienste[id]; if(!d) return;
   const alt=(DATA.mitarbeiter[d.maId]||{}).name||"?";
   const neu=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
-  if(!confirm(`Dienst am ${dLabel(d.datum)} (${SCHICHT_NAME[schichtVon(d)]}) übernehmen?`)) return;
+  if(!confirm(`Dienst am ${dLabel(d.datum)} (${dienstLabel(d)}, ${bereichVonDienst(d)}) übernehmen?`)) return;
   save("dienste/"+id, Object.assign({},d,{maId:SESSION.id,tausch:false}));
-  save("hinweise/"+uid(), {text:`Diensttausch: ${neu} übernimmt den Dienst von ${alt} am ${dLabel(d.datum)} (${SCHICHT_NAME[schichtVon(d)]}).`, ts:Date.now()});
+  save("hinweise/"+uid(), {text:`Diensttausch: ${neu} übernimmt den Dienst von ${alt} am ${dLabel(d.datum)} (${dienstLabel(d)}).`, ts:Date.now()});
   setFlash("ok","Dienst übernommen."); render();
 }
 function pruefe(von,bis,pause){
@@ -949,9 +984,9 @@ async function maSave(id){
       await fs.collection(COLL.uidmap).doc(neueUid).set({maId});
       const alteUid=(DATA.privat[maId]||{}).authUid;
       if(alteUid&&alteUid!==neueUid){ try{ await fs.collection(COLL.uidmap).doc(alteUid).delete(); }catch(e){} }
-      save("privat/"+maId,{code,fest:artFest,lohn:artFest?0:betrag,gehalt:artFest?betrag:0,authUid:neueUid});
+      save("privat/"+maId,{code,fest:artFest,lohn:artFest?0:betrag,authUid:neueUid});
     }else{
-      save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,fest:artFest,lohn:artFest?0:betrag,gehalt:artFest?betrag:0}));
+      save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,fest:artFest,lohn:artFest?0:betrag}));
     }
     save("mitarbeiter/"+maId,{name,bereiche,minijob});
     uiEditMa=""; uiNeuerCode="";
@@ -969,8 +1004,8 @@ async function maDel(id){
 }
 function setSave(){
   const abg=Number(document.getElementById("s_abg").value);
-  const abgF=Number(document.getElementById("s_abg_fest").value);
-  save("meta",Object.assign({},DATA.meta,{abgaben:isNaN(abg)?DEFAULT_ABGABEN:abg, abgabenFest:isNaN(abgF)?DEFAULT_ABGABEN_FEST:abgF}));
+  const gr=Number(document.getElementById("s_grenze").value);
+  save("meta",Object.assign({},DATA.meta,{abgaben:isNaN(abg)?DEFAULT_ABGABEN:abg, grenze:isNaN(gr)||gr<=0?MINIJOB_GRENZE:gr}));
   setFlash("ok","Gespeichert."); render();
 }
 function tageSave(){
@@ -983,9 +1018,10 @@ function pwSave(){
   const pw=document.getElementById("s_pw").value;
   if(pw.length<6){ setFlash("err","Das Passwort braucht mindestens 6 Zeichen."); return render(); }
   auth.currentUser.updatePassword(pw)
-    .then(()=>{ setFlash("ok","Passwort geändert."); render(); })
-    .catch(e=>{ setFlash("err", e.code==="auth/requires-recent-login"
-      ? "Bitte einmal ab- und wieder anmelden, dann geht es." : fbText(e)); render(); });
+    .then(()=>{ setFest("ok","Passwort geändert. Notier es dir, bevor du die Seite schließt."); render(); })
+    .catch(e=>{ setFest("err", e.code==="auth/requires-recent-login"
+      ? "Das Passwort wurde NICHT geändert. Bitte einmal abmelden, neu anmelden und es dann sofort nochmal versuchen."
+      : fbText(e)); render(); });
 }
 
 /* ---------- Export ---------- */
@@ -996,7 +1032,7 @@ function csvExport(){
     const m=DATA.mitarbeiter[z.maId]||{name:"unbekannt"};
     const h=std(netto(z)), f=istFest(z.maId), l=lohnVon(z.maId);
     rows.push([m.name,bereichText(m),dParse(z.datum).toLocaleDateString("de-DE"),z.von,z.bis,z.pause||0,num(h),
-      f?"Festgehalt":num(l), f?"":num(h*l)]);
+      f?"festangestellt":num(l), f?"":num(h*l)]);
   });
   const csv="\uFEFF"+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\r\n");
   lade(new Blob([csv],{type:"text/csv"}),"stunden_"+mk+".csv");
