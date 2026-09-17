@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dienstplan &amp; Zeiterfassung</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Dienstplan">
+<meta name="theme-color" content="#E8E3E4">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Nunito+Sans:wght@600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+:root{
+  --bg:#E8E3E4; --paper:#fff; --ink:#020202; --ink2:#63585d; --accent:#60233a;
+  --accent2:#6F5158; --line:#d9d1d3; --ok:#2e7d4f; --warn:#a8791b; --bad:#b3261e; --r:10px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:Nunito,system-ui,sans-serif;font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}
+h1,h2,h3{font-family:"Nunito Sans",Nunito,sans-serif;margin:0 0 8px;line-height:1.2}
+h1{font-size:24px} h2{font-size:19px} h3{font-size:16px}
+.wrap{max-width:720px;margin:0 auto;padding:0 12px 96px}
+header.top{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 0 0}
+.topbar{display:flex;align-items:center;gap:10px;justify-content:space-between;max-width:720px;margin:0 auto;padding:0 12px}
+.who{font-weight:700;font-size:15px}
+.who small{display:block;font-weight:400;color:var(--ink2);font-size:12px}
+nav.tabs{display:flex;gap:6px;overflow-x:auto;max-width:720px;margin:8px auto 0;padding:0 12px 8px;-webkit-overflow-scrolling:touch}
+nav.tabs button{flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--ink2);padding:8px 12px;border-radius:999px;font:600 14px Nunito;cursor:pointer;white-space:nowrap}
+nav.tabs button[aria-current="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin:12px 0}
+.card.flat{padding:0;overflow:hidden}
+label{display:block;font-size:13px;font-weight:600;color:var(--ink2);margin:10px 0 4px}
+input,select{width:100%;padding:11px 10px;border:1px solid var(--line);border-radius:8px;font:400 16px Nunito;background:#fff;color:var(--ink)}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent2);outline-offset:1px}
+.row{display:flex;gap:8px}
+.row>*{flex:1;min-width:0}
+button.btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:12px 14px;font:700 16px Nunito;cursor:pointer;width:100%;margin-top:12px}
+button.btn.sec{background:#fff;color:var(--accent);border:1px solid var(--accent)}
+button.btn.ghost{background:transparent;color:var(--ink2);border:1px solid var(--line)}
+button.btn[disabled]{opacity:.55}
+button.mini{background:#fff;border:1px solid var(--line);color:var(--accent);border-radius:8px;padding:6px 10px;font:600 13px Nunito;cursor:pointer;width:auto;margin:0}
+button.mini.warn{color:var(--bad);border-color:#e6c6c3}
+.linkbtn{background:none;border:0;color:var(--accent);font:600 14px Nunito;cursor:pointer;padding:8px;width:100%;margin-top:8px;text-decoration:underline}
+.hint{font-size:13px;color:var(--ink2);margin:6px 0 0}
+.err{background:#fbeceb;border:1px solid #e6c6c3;color:var(--bad);padding:10px;border-radius:8px;font-size:14px;margin-top:10px}
+.ok{background:#eaf4ee;border:1px solid #c3ddcd;color:var(--ok);padding:10px;border-radius:8px;font-size:14px;margin-top:10px}
+.list{list-style:none;margin:0;padding:0}
+.list li{border-top:1px solid var(--line);padding:11px 14px;display:flex;gap:10px;align-items:center;justify-content:space-between}
+.list li:first-child{border-top:0}
+.list .main{min-width:0}
+.list .main b{display:block;font-size:15px}
+.list .main span{display:block;font-size:13px;color:var(--ink2)}
+.val{text-align:right;font-weight:700;white-space:nowrap}
+.val small{display:block;font-weight:400;font-size:12px;color:var(--ink2)}
+.daybox{border-top:1px solid var(--line);padding:10px 14px}
+.daybox:first-child{border-top:0}
+.dayhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.dayhead b{font-size:15px}
+.dayhead.today b{color:var(--accent)}
+.shift{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:7px 9px;border-radius:8px;background:#f6f2f3;margin-top:6px;font-size:14px}
+.shift.mine{background:#f0e4e9;border-left:4px solid var(--accent)}
+.shift.free{background:#fff6e5;border-left:4px solid var(--warn)}
+.shift .t{font-weight:700}
+.shift .btns{display:flex;gap:6px;flex-shrink:0}
+.schicht{margin-top:8px}
+.schichtname{display:block;font:700 12px "Nunito Sans";letter-spacing:.04em;text-transform:uppercase;color:var(--ink2);margin-bottom:2px}
+.sortbar{display:flex;align-items:center;gap:10px;padding:10px 14px}
+.sortbar label{margin:0;white-space:nowrap}
+.sortbar select{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.chip{display:flex;align-items:center;gap:6px;margin:0;padding:8px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;font:600 14px Nunito;color:var(--ink);cursor:pointer}
+.chip input{width:auto;margin:0}
+.chip:has(input:checked){background:#f0e4e9;border-color:var(--accent);color:var(--accent)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:999px;background:#e7e1e3;color:var(--ink2);margin-left:6px}
+.sum{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sum div{background:#f6f2f3;border-radius:8px;padding:10px}
+.sum b{display:block;font-size:20px;font-family:"Nunito Sans"}
+.sum span{font-size:12px;color:var(--ink2)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.dot.g{background:var(--ok)} .dot.y{background:var(--warn)} .dot.r{background:var(--bad)}
+.navmonth{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.navmonth b{font-family:"Nunito Sans";font-size:17px}
+.pin{letter-spacing:.5em;text-align:center;font-size:26px;font-weight:700;padding:14px 10px}
+.center{text-align:center}
+.muted{color:var(--ink2);font-size:14px}
+.banner{background:#fff6e5;border:1px solid #ecd9a8;color:#6b5316;padding:10px 12px;border-radius:8px;font-size:13px;margin:12px 0}
+.code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;word-break:break-all;background:#f2eef0;padding:8px;border-radius:6px;display:block;margin-top:6px}
+#printArea{display:none}
+@media print{
+  body{background:#fff}
+  body>*{display:none !important}
+  #printArea{display:block !important;padding:0;font-size:12px}
+  #printArea table{width:100%;border-collapse:collapse}
+  #printArea th,#printArea td{border:1px solid #999;padding:5px 6px;text-align:left}
+  #printArea th{background:#eee}
+  .sign{margin-top:40px;display:flex;gap:40px}
+  .sign div{flex:1;border-top:1px solid #333;padding-top:4px;font-size:11px}
+}
+</style>
+</head>
+<body>
+
+<div id="root"><div class="wrap"><div class="card center" style="margin-top:60px"><p class="muted">Verbinde …</p></div></div></div>
+<div id="printArea"></div>
+
+<script>
+/* ==========================================================
+   KONFIGURATION
+   ========================================================== */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyC8haQiMq0VvIKxdlcPR4WCIarPIZoukM0",
+  authDomain: "reservierung-9e385.firebaseapp.com",
+  projectId: "reservierung-9e385",
+  storageBucket: "reservierung-9e385.firebasestorage.app",
+  messagingSenderId: "314388602044",
+  appId: "1:314388602044:web:53b7718c92450ae642c4b9"
+};
+
+/* Hier die Benutzer-ID des Leitungs-Kontos eintragen (Schritt 4 der Anleitung).
+   Solange das Feld leer ist, gilt jede Anmeldung mit E-Mail als Leitung -
+   das ist nur für die Einrichtung gedacht. */
+const LEITUNG_UID = "gkBcLVU5DuMmM9WwfKAQ3m5wjLD2";
+
+const PIN_DOMAIN = "@zeit.local";   // technische Adresse hinter dem 4-stelligen Code
+const PIN_SALT   = "-lgh2026";      // verlängert den Code zum Passwort
+const COLL = {
+  mitarbeiter:"zeit_mitarbeiter",   // Name, Bereich - für alle Angemeldeten lesbar
+  privat:"zeit_privat",             // Code und Stundenlohn - nur Leitung
+  uidmap:"zeit_uid",                // Zuordnung Anmeldung -> Mitarbeiter
+  dienste:"zeit_dienste",
+  zeiten:"zeit_zeiten",
+  hinweise:"zeit_hinweise"
+};
+const META_COLL = "zeit_meta", META_DOC = "main";          // Abgaben, nur Leitung
+const KAL_COLL  = "zeit_kalender", KAL_DOC = "main";       // Öffnungstage, alle lesen
+const STD_TAGE = [1,4,5,6,0];                              // Mo, Do, Fr, Sa, So
+const WOCHE = [[1,"Montag"],[2,"Dienstag"],[3,"Mittwoch"],[4,"Donnerstag"],[5,"Freitag"],[6,"Samstag"],[0,"Sonntag"]];
+const BEREICHE = ["Service","Theke","Küche","Spüle","Reinigung","Büro","Springer"];
+const PLAN_BEREICHE = ["Service","Theke","Küche","Spüle","Springer"];   // nur diese im Dienstplan
+const SCHICHT_NAME = {nachmittag:"Nachmittag", abend:"Abend", beide:"Nachmittag + Abend"};
+const DEFAULT_ABGABEN = 32;        // Minijob pauschal
+const MINIJOB_GRENZE = 603;   // Stand 2026, in den Einstellungen änderbar
+</script>
+
+<script>
+/* ==========================================================
+   Zustand
+   ========================================================== */
+let DATA = {mitarbeiter:{},privat:{},dienste:{},zeiten:{},hinweise:{},meta:{},kalender:{}};
+let fb=null, fs=null, auth=null;
+let SESSION=null, AUTHREADY=false, BUSY=false;
+let VIEW="", weekOffset=0, monthOffset=0, detailId=null;
+let editZeitId=null, editDienstId=null;
+let uiFilter="", uiNewDate="", uiEditMa="", uiLeitungForm=false, uiSetupUid="";
+let uiSortUeb="name", uiSortMa="name", uiNeuerCode="";
+let flash=null, flashT=null, unsubs=[];
+
+function setFlash(t,m){ flash={t,m}; clearTimeout(flashT); flashT=setTimeout(()=>{flash=null;render();},5000); }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function fehler(e){ setFlash("err", fbText(e)); }
+function fbText(e){
+  const c = e && e.code || "";
+  if(c==="auth/invalid-credential"||c==="auth/wrong-password"||c==="auth/user-not-found"||c==="auth/invalid-login-credentials")
+    return "Zugang nicht bekannt. Bitte den Code bei der Leitung prüfen lassen.";
+  if(c==="auth/too-many-requests") return "Zu viele Versuche. Bitte einige Minuten warten.";
+  if(c==="auth/network-request-failed") return "Keine Verbindung. Bitte Internet prüfen.";
+  if(c==="permission-denied") return "Dafür fehlt die Berechtigung.";
+  if(c==="auth/operation-not-allowed") return "In Firebase ist die Anmeldung per E-Mail noch nicht aktiviert.";
+  return (e && e.message) ? e.message : String(e);
+}
+
+/* ==========================================================
+   Datenzugriff
+   ========================================================== */
+function setNode(path,val){
+  const p=path.split("/"); let o=DATA;
+  for(let i=0;i<p.length-1;i++){ if(!o[p[i]]) o[p[i]]={}; o=o[p[i]]; }
+  if(val===null) delete o[p[p.length-1]]; else o[p[p.length-1]]=val;
+}
+function save(path,val){
+  const p=path.split("/");
+  setNode(path,val);
+  if(!fs) return;
+  if(p[0]==="meta"){ fs.collection(META_COLL).doc(META_DOC).set(val,{merge:true}).catch(fehler); return; }
+  if(p[0]==="kalender"){ fs.collection(KAL_COLL).doc(KAL_DOC).set(val,{merge:true}).catch(fehler); return; }
+  const c=COLL[p[0]]; if(!c) return;
+  if(p.length===2) fs.collection(c).doc(p[1]).set(val).catch(fehler);
+  else if(p.length===3) fs.collection(c).doc(p[1]).set({[p[2]]:val},{merge:true}).catch(fehler);
+}
+function del(path){
+  const p=path.split("/"); const c=COLL[p[0]]; if(!c) return;
+  setNode(path,null);
+  if(fs) fs.collection(c).doc(p[1]).delete().catch(fehler);
+}
+function stopSync(){ unsubs.forEach(u=>{try{u()}catch(e){}}); unsubs=[]; }
+function listen(key,query){
+  unsubs.push(query.onSnapshot(snap=>{
+    const o={}; snap.forEach(d=>o[d.id]=d.data()); DATA[key]=o; render();
+  }, e=>console.warn("Sync "+key, e && e.code)));
+}
+function syncLeitung(){
+  stopSync();
+  ["mitarbeiter","privat","dienste","zeiten","hinweise"].forEach(k=>listen(k, fs.collection(COLL[k])));
+  unsubs.push(fs.collection(META_COLL).doc(META_DOC).onSnapshot(d=>{ DATA.meta=d.data()||{}; render(); }, ()=>{}));
+  unsubs.push(fs.collection(KAL_COLL).doc(KAL_DOC).onSnapshot(d=>{ DATA.kalender=d.data()||{}; render(); }, ()=>{}));
+}
+function syncMitarbeiter(maId){
+  stopSync();
+  listen("mitarbeiter", fs.collection(COLL.mitarbeiter));
+  listen("dienste", fs.collection(COLL.dienste));
+  listen("zeiten", fs.collection(COLL.zeiten).where("maId","==",maId));
+  unsubs.push(fs.collection(KAL_COLL).doc(KAL_DOC).onSnapshot(d=>{ DATA.kalender=d.data()||{}; render(); }, ()=>{}));
+  DATA.privat={}; DATA.hinweise={}; DATA.meta={};
+}
+
+/* ==========================================================
+   Anmeldung
+   ========================================================== */
+function start(){
+  if(!window.firebase){ document.getElementById("root").innerHTML =
+    `<div class="wrap"><div class="card"><h2>Keine Verbindung</h2><p class="muted">Die Seite konnte die Firebase-Bibliothek nicht laden. Bitte Internetverbindung prüfen und neu laden.</p></div></div>`; return; }
+  fb = firebase.initializeApp(FIREBASE_CONFIG);
+  fs = firebase.firestore();
+  auth = firebase.auth();
+  fs.enablePersistence({synchronizeTabs:true}).catch(()=>{});
+  auth.onAuthStateChanged(async u=>{
+    AUTHREADY=true;
+    if(!u){ SESSION=null; stopSync(); DATA={mitarbeiter:{},privat:{},dienste:{},zeiten:{},hinweise:{},meta:{},kalender:{}}; return render(); }
+    const istLeitung = LEITUNG_UID ? (u.uid===LEITUNG_UID) : !!(u.email && !u.email.endsWith(PIN_DOMAIN));
+    if(istLeitung){
+      SESSION={role:"admin"};
+      if(!LEITUNG_UID){ uiSetupUid = u.uid; }
+      syncLeitung();
+    } else {
+      try{
+        const d = await fs.collection(COLL.uidmap).doc(u.uid).get();
+        if(!d.exists){ setFlash("err","Dieser Zugang ist nicht mehr freigeschaltet."); await auth.signOut(); return; }
+        SESSION={role:"ma", id:d.data().maId};
+        syncMitarbeiter(SESSION.id);
+      }catch(e){ fehler(e); await auth.signOut(); return; }
+    }
+    VIEW=""; render();
+  });
+}
+function pinLogin(){
+  const v=(document.getElementById("pin").value||"").trim();
+  if(!/^\d{4}$/.test(v)) return setFlash("err","Bitte den vierstelligen Code eingeben.");
+  BUSY=true; render();
+  auth.signInWithEmailAndPassword("code"+v+PIN_DOMAIN, v+PIN_SALT)
+    .catch(e=>{ BUSY=false; fehler(e); render(); });
+}
+function leitungLogin(){
+  const m=(document.getElementById("l_mail").value||"").trim();
+  const p=document.getElementById("l_pw").value||"";
+  if(!m||!p) return setFlash("err","Bitte E-Mail und Passwort eingeben.");
+  BUSY=true; render();
+  auth.signInWithEmailAndPassword(m,p).catch(e=>{ BUSY=false; fehler(e); render(); });
+}
+function zweitApp(){
+  const vorhanden = firebase.apps.filter(a=>a.name==="anlegen")[0];
+  return vorhanden || firebase.initializeApp(FIREBASE_CONFIG,"anlegen");
+}
+async function zugangAnlegen(code){
+  const mail="code"+code+PIN_DOMAIN, pw=code+PIN_SALT;
+  const app=zweitApp();
+  try{
+    const c=await app.auth().createUserWithEmailAndPassword(mail,pw);
+    const id=c.user.uid; await app.auth().signOut(); return id;
+  }catch(e){
+    if(e.code==="auth/email-already-in-use"){
+      const c=await app.auth().signInWithEmailAndPassword(mail,pw);
+      const id=c.user.uid; await app.auth().signOut(); return id;
+    }
+    throw e;
+  }
+}
+
+/* ==========================================================
+   Helfer
+   ========================================================== */
+const pad=n=>String(n).padStart(2,"0");
+const iso=d=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+const heute=()=>iso(new Date());
+function gestern(){ const d=new Date(); d.setDate(d.getDate()-1); return iso(d); }
+function dParse(s){ const [y,m,t]=s.split("-").map(Number); return new Date(y,m-1,t); }
+const WT=["So","Mo","Di","Mi","Do","Fr","Sa"];
+const MON=["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+function dLabel(s){ const d=dParse(s); return WT[d.getDay()]+" "+pad(d.getDate())+"."+pad(d.getMonth()+1)+"."; }
+function min(t){ if(!t) return null; const [h,m]=t.split(":").map(Number); return h*60+m; }
+function dauer(von,bis){ const v=min(von),b=min(bis); if(v===null||b===null) return 0; return b<=v ? b+1440-v : b-v; }
+function hhmm(m){ return Math.floor(m/60)+":"+pad(m%60); }
+function std(m){ return m/60; }
+function eur(n){ return n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})+" €"; }
+function num(n,k){ k=(k===undefined?2:k); return n.toLocaleString("de-DE",{minimumFractionDigits:k,maximumFractionDigits:k}); }
+function pflichtPause(netto){ return netto>540?45:(netto>360?30:0); }
+function autoPause(brutto){ return brutto<=360?0:(brutto<=570?30:45); }   // 6 h / 9 h Grenze
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function monatKey(off){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()+off); return d.getFullYear()+"-"+pad(d.getMonth()+1); }
+function monatLabel(off){ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()+off); return MON[d.getMonth()]+" "+d.getFullYear(); }
+function wochenTage(off){
+  const d=new Date(); const wd=(d.getDay()+6)%7; d.setDate(d.getDate()-wd+off*7);
+  return Array.from({length:7},(_,i)=>{ const x=new Date(d); x.setDate(d.getDate()+i); return iso(x); });
+}
+function bereicheVon(m){
+  if(!m) return [];
+  if(Array.isArray(m.bereiche)&&m.bereiche.length) return m.bereiche;
+  return m.bereich?[m.bereich]:[];     // alte Einträge mit nur einem Bereich
+}
+function bereichText(m){ return bereicheVon(m).join(" · "); }
+function imPlan(m){ return bereicheVon(m).some(b=>PLAN_BEREICHE.indexOf(b)>=0); }
+function dienstZeit(d){ return d.von || ""; }
+function dienstLabel(d){
+  if(d.von) return "ab "+d.von;
+  return SCHICHT_NAME[d.schicht]||"Abend";        // alte Einträge ohne Uhrzeit
+}
+function dienstSort(d){ return d.von?min(d.von):(d.schicht==="nachmittag"?840:1020); }
+function bereichVonDienst(d){ return d.bereich || bereicheVon(DATA.mitarbeiter[d.maId])[0] || ""; }
+function maList(){ return Object.keys(DATA.mitarbeiter).map(id=>Object.assign({id},DATA.mitarbeiter[id]))
+  .sort((a,b)=>(bereicheVon(a)[0]||"").localeCompare(bereicheVon(b)[0]||"")||(a.name||"").localeCompare(b.name||"")); }
+function zeitList(){ return Object.keys(DATA.zeiten).map(id=>Object.assign({id},DATA.zeiten[id])); }
+function dienstList(){ return Object.keys(DATA.dienste).map(id=>Object.assign({id},DATA.dienste[id])); }
+function netto(z){ return Math.max(0, dauer(z.von,z.bis)-(z.pause||0)); }
+function monatMin(maId,mk){ return zeitList().filter(z=>z.maId===maId&&z.datum.startsWith(mk)).reduce((s,z)=>s+netto(z),0); }
+function lohnVon(maId){ return Number((DATA.privat[maId]||{}).lohn||0); }
+function istFest(maId){ return !!(DATA.privat[maId]||{}).fest; }
+function kostenVon(maId,minuten){ return istFest(maId) ? 0 : std(minuten)*lohnVon(maId); }
+function tageOffen(){ return Array.isArray(DATA.kalender.tage) ? DATA.kalender.tage : STD_TAGE; }
+function codeVon(maId){ return (DATA.privat[maId]||{}).code||""; }
+function abgSatz(){ return DATA.meta.abgaben===undefined?DEFAULT_ABGABEN:Number(DATA.meta.abgaben); }
+function grenze(){ return DATA.meta.grenze===undefined?MINIJOB_GRENZE:Number(DATA.meta.grenze); }
+function nachtragOK(datum){ return datum===heute()||datum===gestern(); }
+function codeBelegt(c){ return maList().some(m=>codeVon(m.id)===c); }
+function langweilig(c){
+  if(/^(\d)\1{3}$/.test(c)) return true;                       // 1111, 0000
+  const d=c.split("").map(Number);
+  const auf=d.every((x,i)=>i===0||x===d[i-1]+1);
+  const ab =d.every((x,i)=>i===0||x===d[i-1]-1);
+  return auf||ab;                                               // 1234, 4321
+}
+function freierCode(){
+  for(let i=0;i<400;i++){
+    const c=String(1000+Math.floor(Math.random()*9000));
+    if(!codeBelegt(c)&&!langweilig(c)) return c;
+  }
+  for(let n=1000;n<10000;n++){ const c=String(n); if(!codeBelegt(c)) return c; }
+  return "";
+}
+
+/* ==========================================================
+   Oberfläche
+   ========================================================== */
+function render(){
+  const r=document.getElementById("root");
+  if(!AUTHREADY){ return; }
+  if(!SESSION){ r.innerHTML=loginView(); const f=document.getElementById("pin"); if(f&&!uiLeitungForm) f.focus(); return; }
+  const tabs = SESSION.role==="admin"
+    ? [["ueb","Übersicht"],["plan","Dienstplan"],["ma","Mitarbeiter"],["hin","Hinweise"],["set","Einstellungen"]]
+    : [["plan","Dienstplan"],["zeit","Zeit eintragen"],["meine","Meine Stunden"],["tausch","Tausch"]];
+  if(!tabs.some(t=>t[0]===VIEW)) VIEW=tabs[0][0];
+  const me = SESSION.role==="ma" ? (DATA.mitarbeiter[SESSION.id]||{name:"…"}) : null;
+  r.innerHTML=`
+  <header class="top">
+    <div class="topbar">
+      <div class="who">${SESSION.role==="admin"?"Leitung":esc(me.name)}
+        <small>${SESSION.role==="admin"?"Alle Mitarbeiter":esc(bereichText(me))}</small></div>
+      <button class="mini" data-act="logout">Abmelden</button>
+    </div>
+    <nav class="tabs">${tabs.map(t=>`<button data-act="tab" data-v="${t[0]}" aria-current="${VIEW===t[0]}">${t[1]}</button>`).join("")}</nav>
+  </header>
+  <div class="wrap">
+    ${(SESSION.role==="admin"&&uiSetupUid)?`<div class="banner"><b>Einrichtung noch offen.</b> Trage diese Benutzer-ID in der Datei bei <b>LEITUNG_UID</b> und in den Firestore-Regeln ein:
+      <span class="code">${esc(uiSetupUid)}</span></div>`:""}
+    ${flash?`<div class="${flash.t}">${esc(flash.m)}</div>`:""}
+    ${body()}
+  </div>`;
+}
+function body(){
+  if(SESSION.role==="admin"){
+    if(VIEW==="ueb") return detailId?adminDetail():adminUeb();
+    if(VIEW==="plan") return planView(true);
+    if(VIEW==="ma") return adminMa();
+    if(VIEW==="hin") return adminHin();
+    if(VIEW==="set") return adminSet();
+  }else{
+    if(VIEW==="plan") return planView(false);
+    if(VIEW==="zeit") return zeitForm();
+    if(VIEW==="meine") return meineStunden();
+    if(VIEW==="tausch") return tauschView();
+  }
+  return "";
+}
+
+function loginView(){
+  return `<div class="wrap"><div style="height:36px"></div>
+  ${flash?`<div class="${flash.t}">${esc(flash.m)}</div>`:""}
+  ${uiLeitungForm?`
+    <div class="card">
+      <h1>Anmeldung Leitung</h1>
+      <label for="l_mail">E-Mail</label><input id="l_mail" type="email" autocomplete="username" placeholder="leitung@landgasthof.local">
+      <label for="l_pw">Passwort</label><input id="l_pw" type="password" autocomplete="current-password">
+      <button class="btn" data-act="leitung-login" ${BUSY?"disabled":""}>${BUSY?"Moment …":"Anmelden"}</button>
+      <button class="linkbtn" data-act="zum-pin">Zurück zur Code-Eingabe</button>
+    </div>`:`
+    <div class="card center">
+      <h1>Dienstplan &amp; Zeiterfassung</h1>
+      <p class="muted">Deinen vierstelligen Code eingeben</p>
+      <input id="pin" class="pin" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="····">
+      <button class="btn" data-act="pin-login" ${BUSY?"disabled":""}>${BUSY?"Moment …":"Anmelden"}</button>
+      <button class="linkbtn" data-act="zur-leitung">Als Leitung anmelden</button>
+    </div>`}
+  </div>`;
+}
+
+/* ---------- Dienstplan ---------- */
+function planView(admin){
+  const alleTage=wochenTage(weekOffset), ds=dienstList();
+  const offen=tageOffen();
+  const tage=alleTage.filter(t=>offen.indexOf(dParse(t).getDay())>=0||ds.some(d=>d.datum===t));
+  const von=dParse(alleTage[0]), bis=dParse(alleTage[6]);
+  return `
+  <div class="navmonth">
+    <button class="mini" data-act="week" data-d="-1">‹ Woche</button>
+    <b>${pad(von.getDate())}.${pad(von.getMonth()+1)}. – ${pad(bis.getDate())}.${pad(bis.getMonth()+1)}.</b>
+    <button class="mini" data-act="week" data-d="1">Woche ›</button>
+  </div>
+  <div class="card">
+    <label for="bfilter">Bereich</label>
+    <select id="bfilter">
+      <option value="">Alle Bereiche</option>
+      ${PLAN_BEREICHE.map(b=>`<option ${uiFilter===b?"selected":""}>${b}</option>`).join("")}
+    </select>
+    ${weekOffset!==0?`<button class="btn ghost" data-act="week" data-d="0">Zur aktuellen Woche</button>`:""}
+  </div>
+  ${dienstFormular()}
+  <div class="card flat">
+    ${tage.length===0?`<div class="daybox"><span class="muted">Diese Woche ist kein Öffnungstag eingetragen.</span></div>`:""}
+    ${tage.map(t=>{
+      let liste=ds.filter(d=>d.datum===t);
+      if(uiFilter) liste=liste.filter(d=>bereichVonDienst(d)===uiFilter);
+      liste.sort((a,b)=>dienstSort(a)-dienstSort(b)||
+        bereichVonDienst(a).localeCompare(bereichVonDienst(b))||
+        ((DATA.mitarbeiter[a.maId]||{}).name||"").localeCompare((DATA.mitarbeiter[b.maId]||{}).name||""));
+      return `<div class="daybox">
+        <div class="dayhead ${t===heute()?"today":""}">
+          <b>${dLabel(t)}${t===heute()?" · heute":""}</b>
+          <button class="mini" data-act="dienst-new" data-datum="${t}">+ Dienst</button>
+        </div>
+        ${liste.length===0?`<span class="muted">niemand eingeteilt</span>`:liste.map(d=>shiftRow(d,admin)).join("")}
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+function shiftRow(d,admin){
+  const m=DATA.mitarbeiter[d.maId]||{name:"?"};
+  const mine=SESSION.role==="ma"&&d.maId===SESSION.id;
+  const cls=d.tausch?"free":(mine?"mine":"");
+  let btn="";
+  if(admin){
+    btn=`<button class="mini" data-act="dienst-edit" data-id="${d.id}">Ändern</button>`;
+  } else if(mine){
+    btn=`<button class="mini" data-act="dienst-edit" data-id="${d.id}">Ändern</button>`
+      + (d.datum>=heute()
+          ? (d.tausch?`<button class="mini" data-act="tausch-zurueck" data-id="${d.id}">Zurückziehen</button>`
+                     :`<button class="mini" data-act="tausch-an" data-id="${d.id}">Tausch anbieten</button>`)
+          : "");
+  } else if(d.tausch&&d.datum>=heute()){
+    btn=`<button class="mini" data-act="tausch-nehmen" data-id="${d.id}">Übernehmen</button>`;
+  }
+  return `<div class="shift ${cls}">
+    <span><span class="t">${esc(dienstLabel(d))}</span> ${esc(m.name)}
+      <span class="tag">${esc(bereichVonDienst(d))}</span>
+      ${d.tausch?`<span class="tag" style="background:#fff0d0;color:#7a5a10">Tausch frei</span>`:""}
+      ${d.notiz?`<span class="tag">${esc(d.notiz)}</span>`:""}</span>
+    <span class="btns">${btn}</span></div>`;
+}
+function dienstFormular(){
+  const admin=SESSION.role==="admin";
+  const d=editDienstId?DATA.dienste[editDienstId]:null;
+  const eigen=!admin&&d&&d.maId!==SESSION.id;
+  if(eigen) return `<div class="card"><p class="muted">Diesen Dienst hat jemand anderes. Ändern kann ihn nur die Leitung – oder du übernimmst ihn, wenn er zum Tausch angeboten wird.</p>
+    <button class="btn ghost" data-act="dienst-abbruch">Zurück</button></div>`;
+  return `<div class="card">
+    <h2>${d?"Dienst ändern":"Dienst eintragen"}</h2>
+    ${admin?`<label for="d_ma">Mitarbeiter</label>
+    <select id="d_ma">${maList().map(m=>`<option value="${m.id}" ${d&&d.maId===m.id?"selected":""}>${esc(m.name)}${bereichText(m)?" · "+esc(bereichText(m)):""}</option>`).join("")}</select>`
+    :`<p class="hint">Für dich: <b>${esc((DATA.mitarbeiter[SESSION.id]||{}).name||"")}</b></p>`}
+    <label for="d_bereich">Bereich an diesem Tag</label>
+    <select id="d_bereich">${PLAN_BEREICHE.map(b=>`<option ${(d?bereichVonDienst(d):"")===b?"selected":""}>${b}</option>`).join("")}</select>
+    <label for="d_datum">Datum</label>
+    <input type="date" id="d_datum" value="${d?d.datum:(uiNewDate||heute())}">
+    <label for="d_von">Beginn</label>
+    <input type="time" id="d_von" value="${d?dienstZeit(d):"17:00"}">
+    <label for="d_notiz">Notiz (optional)</label>
+    <input id="d_notiz" value="${d?esc(d.notiz||""):""}" placeholder="z. B. Hochzeit Saal">
+    <button class="btn" data-act="dienst-save">${d?"Änderung speichern":"Dienst speichern"}</button>
+    ${d?`<button class="btn ghost" data-act="dienst-del" data-id="${editDienstId}">Dienst löschen</button>
+         <button class="btn ghost" data-act="dienst-abbruch">Abbrechen</button>`:""}
+  </div>`;
+}
+
+/* ---------- Zeit eintragen ---------- */
+function zeitForm(){
+  const z=editZeitId?DATA.zeiten[editZeitId]:null;
+  const d=z?z.datum:heute();
+  return `<div class="card">
+    <h2>${z?"Eintrag korrigieren":"Arbeitszeit eintragen"}</h2>
+    <label for="z_datum">Tag</label>
+    <select id="z_datum">
+      <option value="${heute()}" ${d===heute()?"selected":""}>Heute · ${dLabel(heute())}</option>
+      <option value="${gestern()}" ${d===gestern()?"selected":""}>Gestern · ${dLabel(gestern())}</option>
+    </select>
+    <div class="row">
+      <div><label for="z_von">Von</label><input type="time" id="z_von" value="${z?z.von:""}" data-live></div>
+      <div><label for="z_bis">Bis</label><input type="time" id="z_bis" value="${z?z.bis:""}" data-live></div>
+    </div>
+    <label for="z_pause">Pause in Minuten</label>
+    <input type="number" id="z_pause" min="0" step="5" inputmode="numeric" value="${z?(z.pause||0):0}" data-live data-pause>
+    <p class="hint" id="calc">Ab mehr als 6 Stunden Arbeitszeit sind 30 Minuten Pause Pflicht, ab mehr als 9 Stunden 45 Minuten.</p>
+    <button class="btn" data-act="zeit-save">${z?"Korrektur speichern":"Zeit speichern"}</button>
+    ${z?`<button class="btn ghost" data-act="zeit-abbruch">Abbrechen</button>`:""}
+    <p class="hint">Ein Dienst über Mitternacht zählt zu dem Tag, an dem er begonnen hat. Ändern kannst du nur heute und gestern.</p>
+  </div>`;
+}
+function pauseSetzen(){
+  const v=document.getElementById("z_von"), b=document.getElementById("z_bis"), p=document.getElementById("z_pause");
+  if(!v||!b||!p||!v.value||!b.value) return;
+  const soll=autoPause(dauer(v.value,b.value));
+  if(Number(p.value||0)<soll) p.value=soll;          // kleinere Werte werden angehoben
+  if(soll===0&&!p.dataset.selbst) p.value=0;
+}
+function liveCalc(){
+  const el=document.getElementById("calc"); if(!el) return;
+  const v=document.getElementById("z_von").value, b=document.getElementById("z_bis").value;
+  const p=Number(document.getElementById("z_pause").value||0);
+  if(!v||!b){ el.textContent="Ab mehr als 6 Stunden Arbeitszeit sind 30 Minuten Pause Pflicht, ab mehr als 9 Stunden 45 Minuten."; return; }
+  const br=dauer(v,b), ne=Math.max(0,br-p), soll=pflichtPause(ne);
+  let html=`Anwesend ${hhmm(br)} Std, Pause ${p} Min, <b>Arbeitszeit ${hhmm(ne)} Std</b>`
+    +(soll>p?` <span style="color:var(--bad)">– mindestens ${soll} Minuten Pause nötig</span>`:"");
+  const ext=pflichtPause(br);
+  if(ext>0){
+    const neuesEnde=zeitText(min(v)+br+ext);
+    html+=`<br><span style="color:var(--accent)">Die Pause wird abgezogen. Wenn du ${hhmm(br)} Std arbeiten wolltest, muss das Ende ${ext} Minuten später stehen.</span>
+      <br><button class="mini" data-act="ende-plus" style="margin-top:6px">Ende auf ${neuesEnde} setzen</button>`;
+  }
+  el.innerHTML=html;
+}
+function zeitText(m){ m=((m%1440)+1440)%1440; return pad(Math.floor(m/60))+":"+pad(m%60); }
+function endePlus(){
+  const v=document.getElementById("z_von"), b=document.getElementById("z_bis"), p=document.getElementById("z_pause");
+  if(!v||!b||!v.value||!b.value) return;
+  const br=dauer(v.value,b.value), ext=pflichtPause(br);
+  if(!ext) return;
+  b.value=zeitText(min(v.value)+br+ext);
+  p.value=ext;
+  liveCalc();
+}
+
+function meineStunden(){
+  const mk=monatKey(monthOffset);
+  const zs=zeitList().filter(z=>z.maId===SESSION.id&&z.datum.startsWith(mk)).sort((a,b)=>a.datum.localeCompare(b.datum)||min(a.von)-min(b.von));
+  const summe=zs.reduce((s,z)=>s+netto(z),0);
+  return `
+  <div class="navmonth">
+    <button class="mini" data-act="month" data-d="-1">‹</button><b>${monatLabel(monthOffset)}</b>
+    <button class="mini" data-act="month" data-d="1">›</button>
+  </div>
+  <div class="card"><div class="sum">
+    <div><b>${num(std(summe))}</b><span>Stunden im Monat</span></div>
+    <div><b>${zs.length}</b><span>Einträge</span></div>
+  </div></div>
+  <div class="card flat"><ul class="list">
+    ${zs.length===0?`<li><div class="main"><span>Noch keine Zeiten in diesem Monat.</span></div></li>`:
+    zs.map(z=>`<li>
+      <div class="main"><b>${dLabel(z.datum)}</b><span>${esc(z.von)}–${esc(z.bis)} · Pause ${z.pause||0} Min</span></div>
+      <div class="val">${num(std(netto(z)))} Std
+        ${nachtragOK(z.datum)?`<small><button class="mini" data-act="zeit-edit" data-id="${z.id}">ändern</button></small>`:""}
+      </div></li>`).join("")}
+  </ul></div>
+  <p class="hint">Ältere Einträge ändert nur die Leitung.</p>`;
+}
+
+function tauschView(){
+  const offen=dienstList().filter(d=>d.tausch&&d.datum>=heute()).sort((a,b)=>a.datum.localeCompare(b.datum));
+  const meine=dienstList().filter(d=>d.maId===SESSION.id&&d.datum>=heute()).sort((a,b)=>a.datum.localeCompare(b.datum));
+  return `
+  <div class="card">
+    <h2>Freie Dienste zum Übernehmen</h2>
+    ${offen.length===0?`<p class="muted">Gerade bietet niemand einen Dienst an.</p>`:
+      offen.map(d=>`<div class="shift free">
+        <span><span class="t">${dLabel(d.datum)} · ${dienstLabel(d)}</span> ${esc((DATA.mitarbeiter[d.maId]||{}).name||"")}
+        <span class="tag">${esc(bereichVonDienst(d))}</span></span>
+        ${d.maId===SESSION.id?`<button class="mini" data-act="tausch-zurueck" data-id="${d.id}">Zurückziehen</button>`
+          :`<button class="mini" data-act="tausch-nehmen" data-id="${d.id}">Übernehmen</button>`}
+      </div>`).join("")}
+  </div>
+  <div class="card">
+    <h2>Meine nächsten Dienste</h2>
+    ${meine.length===0?`<p class="muted">Für dich ist aktuell kein Dienst eingetragen.</p>`:
+      meine.map(d=>`<div class="shift mine">
+        <span><span class="t">${dLabel(d.datum)} · ${dienstLabel(d)}</span>
+        <span class="tag">${esc(bereichVonDienst(d))}</span></span>
+        ${d.tausch?`<button class="mini" data-act="tausch-zurueck" data-id="${d.id}">Zurückziehen</button>`
+          :`<button class="mini" data-act="tausch-an" data-id="${d.id}">Tausch anbieten</button>`}
+      </div>`).join("")}
+  </div>
+  <p class="hint">Wer einen angebotenen Dienst übernimmt, ist ab sofort dafür eingeteilt. Die Leitung wird automatisch informiert.</p>`;
+}
+
+/* ---------- Leitung ---------- */
+function adminUeb(){
+  const mk=monatKey(monthOffset);
+  const rows=maList().map(m=>{ const mm=monatMin(m.id,mk); return {m,mm,lohn:kostenVon(m.id,mm),fest:istFest(m.id)}; });
+  rows.sort((a,b)=>{
+    if(uiSortUeb==="stunden") return b.mm-a.mm;
+    if(uiSortUeb==="kosten")  return b.lohn-a.lohn;
+    if(uiSortUeb==="bereich") return (bereicheVon(a.m)[0]||"").localeCompare(bereicheVon(b.m)[0]||"")||a.m.name.localeCompare(b.m.name);
+    return (a.m.name||"").localeCompare(b.m.name||"");
+  });
+  const gesStd=rows.reduce((s,r)=>s+r.mm,0), gesLohn=rows.reduce((s,r)=>s+r.lohn,0);
+  const abgaben=gesLohn*abgSatz()/100;
+  const anzFest=rows.filter(r=>r.fest).length;
+  return `
+  <div class="navmonth">
+    <button class="mini" data-act="month" data-d="-1">‹</button><b>${monatLabel(monthOffset)}</b>
+    <button class="mini" data-act="month" data-d="1">›</button>
+  </div>
+  <div class="card">
+    <div class="sum">
+      <div><b>${num(std(gesStd))}</b><span>Stunden gesamt</span></div>
+      <div><b>${eur(gesLohn)}</b><span>Bruttolohn</span></div>
+      <div><b>${eur(abgaben)}</b><span>Abgaben ${num(abgSatz(),0)} %</span></div>
+      <div><b>${eur(gesLohn+abgaben)}</b><span>Kosten gesamt</span></div>
+    </div>
+    <p class="hint">Hochrechnung aus den erfassten Zeiten dieses Monats, nur Minijobber.${anzFest?` ${anzFest} fest angestellte Personen sind hier nicht enthalten – bei ihnen zählt allein die Zeiterfassung.`:""}</p>
+  </div>
+  <div class="card sortbar">
+    <label for="sort_ueb">Sortieren nach</label>
+    <select id="sort_ueb">
+      <option value="name" ${uiSortUeb==="name"?"selected":""}>Name A–Z</option>
+      <option value="bereich" ${uiSortUeb==="bereich"?"selected":""}>Bereich</option>
+      <option value="stunden" ${uiSortUeb==="stunden"?"selected":""}>Stunden, meiste zuerst</option>
+      <option value="kosten" ${uiSortUeb==="kosten"?"selected":""}>Betrag, höchster zuerst</option>
+    </select>
+  </div>
+  <div class="card flat"><ul class="list">
+    ${rows.length===0?`<li><div class="main"><span>Noch keine Mitarbeiter angelegt.</span></div></li>`:
+    rows.map(r=>{
+      const g=r.m.minijob!==false&&!r.fest;
+      const amp=!g?"":(r.lohn>grenze()?"r":(r.lohn>grenze()*0.9?"y":"g"));
+      return `<li data-act="detail" data-id="${r.m.id}" style="cursor:pointer">
+        <div class="main"><b>${amp?`<span class="dot ${amp}"></span>`:""}${esc(r.m.name)}</b>
+          <span>${esc(bereichText(r.m))}${g?` · Grenze ${num(grenze(),0)} €`:""}</span></div>
+        <div class="val">${num(std(r.mm))} Std<small>${r.fest?"festangestellt":eur(r.lohn)}</small></div></li>`;
+    }).join("")}
+  </ul></div>
+  <button class="btn sec" data-act="csv">CSV-Export ${monatLabel(monthOffset)}</button>
+  <p class="hint">Tippe auf einen Namen für die Einzelansicht mit allen Tagen.</p>`;
+}
+function adminDetail(){
+  const m=DATA.mitarbeiter[detailId]; if(!m){ detailId=null; return adminUeb(); }
+  const mk=monatKey(monthOffset);
+  const zs=zeitList().filter(z=>z.maId===detailId&&z.datum.startsWith(mk)).sort((a,b)=>a.datum.localeCompare(b.datum)||min(a.von)-min(b.von));
+  const summe=zs.reduce((s,z)=>s+netto(z),0), lohn=kostenVon(detailId,summe), fest=istFest(detailId);
+  const z=editZeitId?DATA.zeiten[editZeitId]:null;
+  return `
+  <button class="mini" data-act="detail-zu">‹ Zurück zur Übersicht</button>
+  <div class="navmonth" style="margin-top:10px">
+    <button class="mini" data-act="month" data-d="-1">‹</button>
+    <b>${esc(m.name)} · ${monatLabel(monthOffset)}</b>
+    <button class="mini" data-act="month" data-d="1">›</button>
+  </div>
+  <div class="card"><div class="sum">
+    <div><b>${num(std(summe))}</b><span>Stunden</span></div>
+    <div><b>${zs.length}</b><span>Einträge</span></div>
+    ${fest?"":`<div><b>${eur(lohn)}</b><span>Bruttolohn</span></div>
+    <div><b>${eur(lohn*(1+abgSatz()/100))}</b><span>Kosten mit Abgaben</span></div>`}
+  </div>${fest?`<p class="hint">Fest angestellt – hier werden nur die Stunden gezählt.</p>`:""}</div>
+  <div class="card flat"><ul class="list">
+    ${zs.length===0?`<li><div class="main"><span>Keine Zeiten in diesem Monat.</span></div></li>`:
+    zs.map(x=>`<li>
+      <div class="main"><b>${dLabel(x.datum)}</b><span>${esc(x.von)}–${esc(x.bis)} · Pause ${x.pause||0} Min${x.korr?" · korrigiert":""}</span></div>
+      <div class="val">${num(std(netto(x)))} Std<small>
+        <button class="mini" data-act="a-zeit-edit" data-id="${x.id}">ändern</button>
+        <button class="mini warn" data-act="a-zeit-del" data-id="${x.id}">löschen</button></small></div></li>`).join("")}
+  </ul></div>
+  <div class="card">
+    <h2>${z?"Eintrag ändern":"Zeit für "+esc(m.name)+" nachtragen"}</h2>
+    <label for="a_datum">Datum</label><input type="date" id="a_datum" value="${z?z.datum:heute()}">
+    <div class="row">
+      <div><label for="a_von">Von</label><input type="time" id="a_von" value="${z?z.von:""}"></div>
+      <div><label for="a_bis">Bis</label><input type="time" id="a_bis" value="${z?z.bis:""}"></div>
+    </div>
+    <label for="a_pause">Pause in Minuten</label>
+    <input type="number" id="a_pause" min="0" step="5" inputmode="numeric" value="${z?(z.pause||0):0}">
+    <button class="btn" data-act="a-zeit-save">${z?"Änderung speichern":"Eintrag anlegen"}</button>
+    ${z?`<button class="btn ghost" data-act="zeit-abbruch">Abbrechen</button>`:""}
+  </div>
+  <button class="btn sec" data-act="print" data-id="${detailId}">Stundenzettel drucken</button>`;
+}
+function adminMa(){
+  const e=uiEditMa?DATA.mitarbeiter[uiEditMa]:null;
+  const sel=e?bereicheVon(e):[];
+  if(!e&&!uiNeuerCode) uiNeuerCode=freierCode();
+  const fest=e?istFest(uiEditMa):false;
+  const liste=maList().slice().sort((a,b)=>{
+    if(uiSortMa==="bereich") return (bereicheVon(a)[0]||"").localeCompare(bereicheVon(b)[0]||"")||a.name.localeCompare(b.name);
+    if(uiSortMa==="code") return (codeVon(a.id)||"").localeCompare(codeVon(b.id)||"");
+    return (a.name||"").localeCompare(b.name||"");
+  });
+  return `
+  <div class="card">
+    <h2>${e?"Mitarbeiter ändern":"Mitarbeiter anlegen"}</h2>
+    <label for="m_name">Name</label><input id="m_name" value="${e?esc(e.name):""}" placeholder="Vor- und Nachname">
+    <label>Bereiche (optional, mehrere möglich)</label>
+    <div class="chips">${BEREICHE.map(b=>`<label class="chip"><input type="checkbox" class="m_ber" value="${b}" ${sel.indexOf(b)>=0?"checked":""}><span>${b}</span></label>`).join("")}</div>
+    <div class="row">
+      <div><label for="m_code">Zugangscode ${e?"":"(automatisch vergeben)"}</label>
+        <input id="m_code" inputmode="numeric" maxlength="4" value="${e?esc(codeVon(uiEditMa)):esc(uiNeuerCode)}" placeholder="4821"></div>
+      <div><label for="m_art">Abrechnung</label>
+        <select id="m_art">
+          <option value="stunde" ${fest?"":"selected"}>Stundenlohn</option>
+          <option value="monat" ${fest?"selected":""}>Festangestellt (nur Zeiterfassung)</option>
+        </select></div>
+    </div>
+    <div id="m_lohn_row" style="display:${fest?"none":"block"}">
+      <label for="m_lohn" id="m_lohn_label">Stundenlohn €</label>
+      <input id="m_lohn" type="number" step="0.01" inputmode="decimal" value="${e&&!fest?esc(lohnVon(uiEditMa)||""):""}" placeholder="13.50">
+    </div>
+    <label id="m_mj_row" style="display:${fest?"none":"flex"};gap:8px;align-items:center;margin-top:12px">
+      <input type="checkbox" id="m_mj" style="width:auto" ${(!e||e.minijob!==false)&&!fest?"checked":""}> Minijob (Grenze ${MINIJOB_GRENZE} € überwachen)
+    </label>
+    ${e?"":`<button class="linkbtn" data-act="code-neu">Anderen Code vorschlagen</button>`}
+    <button class="btn" data-act="ma-save" data-id="${uiEditMa}" ${BUSY?"disabled":""}>${BUSY?"Zugang wird angelegt …":(e?"Änderung speichern":"Mitarbeiter anlegen")}</button>
+    ${e?`<button class="btn ghost" data-act="ma-abbruch">Abbrechen</button>`:""}
+  </div>
+  <div class="card sortbar">
+    <label for="sort_ma">Sortieren nach</label>
+    <select id="sort_ma">
+      <option value="name" ${uiSortMa==="name"?"selected":""}>Name A–Z</option>
+      <option value="bereich" ${uiSortMa==="bereich"?"selected":""}>Bereich</option>
+      <option value="code" ${uiSortMa==="code"?"selected":""}>Code</option>
+    </select>
+  </div>
+  <div class="card flat"><ul class="list">
+    ${liste.length===0?`<li><div class="main"><span>Noch niemand angelegt.</span></div></li>`:
+    liste.map(m=>`<li>
+      <div class="main"><b>${esc(m.name)}</b><span>${esc(bereichText(m))} · Code ${esc(codeVon(m.id)||"–")} · ${istFest(m.id)?"festangestellt":(lohnVon(m.id)?eur(lohnVon(m.id))+"/Std":"kein Lohn hinterlegt")}</span></div>
+      <div class="val"><button class="mini" data-act="ma-edit" data-id="${m.id}">ändern</button>
+        <button class="mini warn" data-act="ma-del" data-id="${m.id}">löschen</button></div></li>`).join("")}
+  </ul></div>
+  <p class="hint">Die Bereiche hier dienen nur der Sortierung und dem Stundenzettel. Wer an einem Tag wo eingeteilt ist, legst du im Dienstplan fest.<br>Beim Anlegen wird automatisch ein Zugang erstellt. Den Code gibst du dem Mitarbeiter weiter – er ist gleichzeitig sein Passwort.</p>`;
+}
+function artUmschalten(){
+  const fest=document.getElementById("m_art").value==="monat";
+  const lab=document.getElementById("m_lohn_label");
+  const feld=document.getElementById("m_lohn");
+  const row=document.getElementById("m_mj_row");
+  const mj=document.getElementById("m_mj");
+  const lohnRow=document.getElementById("m_lohn_row");
+  if(lohnRow) lohnRow.style.display = fest ? "none" : "block";
+  if(row) row.style.display = fest ? "none" : "flex";
+  if(fest&&mj) mj.checked=false;
+}
+function adminHin(){
+  const hs=Object.keys(DATA.hinweise).map(id=>Object.assign({id},DATA.hinweise[id])).sort((a,b)=>b.ts-a.ts);
+  return `<div class="card flat"><ul class="list">
+    ${hs.length===0?`<li><div class="main"><span>Keine offenen Hinweise.</span></div></li>`:
+    hs.map(h=>`<li>
+      <div class="main"><b>${esc(h.text)}</b><span>${new Date(h.ts).toLocaleString("de-DE")}</span></div>
+      <button class="mini" data-act="hin-del" data-id="${h.id}">erledigt</button></li>`).join("")}
+  </ul></div>
+  <p class="hint">Hier landet jeder Diensttausch und jede nachträgliche Korrektur.</p>`;
+}
+function adminSet(){
+  return `<div class="card">
+    <h2>Abgaben</h2>
+    <label for="s_abg">Pauschalabgaben in Prozent</label>
+    <input id="s_abg" type="number" step="0.5" inputmode="decimal" value="${esc(abgSatz())}">
+    <label for="s_grenze">Minijob-Grenze in Euro pro Monat</label>
+    <input id="s_grenze" type="number" step="1" inputmode="numeric" value="${esc(grenze())}">
+    <p class="hint">Stand 2026: 603 €, ab 2027 voraussichtlich 633 €. Die Grenze ist an den Mindestlohn gekoppelt und gilt pro Person, nicht pro Arbeitsverhältnis. Der Abgabensatz von 32 % ist ein Richtwert – den genauen Satz kennt dein Steuerberater.</p>
+    <button class="btn" data-act="set-save">Speichern</button>
+  </div>
+  <div class="card">
+    <h2>Öffnungstage</h2>
+    <p class="hint">Nur diese Tage erscheinen im Dienstplan. Tage mit bereits eingetragenen Diensten bleiben trotzdem sichtbar.</p>
+    <div class="chips">${WOCHE.map(w=>`<label class="chip"><input type="checkbox" class="s_tag" value="${w[0]}" ${tageOffen().indexOf(w[0])>=0?"checked":""}><span>${w[1]}</span></label>`).join("")}</div>
+    <button class="btn" data-act="tage-save">Öffnungstage speichern</button>
+  </div>
+  <div class="card">
+    <h2>Daten sichern</h2>
+    <button class="btn sec" data-act="backup">Alle Daten als Datei sichern</button>
+    <p class="hint">Arbeitszeiten müssen nach § 17 MiLoG zwei Jahre aufbewahrt werden. Der monatliche Stundenzettel-Ausdruck erfüllt das.</p>
+  </div>
+  <div class="card">
+    <h2>Passwort ändern</h2>
+    <label for="s_pw">Neues Passwort der Leitung</label>
+    <input id="s_pw" type="password" autocomplete="new-password" placeholder="mindestens 6 Zeichen">
+    <button class="btn ghost" data-act="pw-save">Passwort ändern</button>
+  </div>`;
+}
+
+/* ==========================================================
+   Aktionen
+   ========================================================== */
+document.addEventListener("click", ev=>{
+  const el=ev.target.closest("[data-act]"); if(!el) return;
+  const a=el.dataset.act, id=el.dataset.id;
+  if(a==="pin-login") return pinLogin();
+  if(a==="leitung-login") return leitungLogin();
+  if(a==="zur-leitung"){ uiLeitungForm=true; return render(); }
+  if(a==="zum-pin"){ uiLeitungForm=false; return render(); }
+  if(a==="logout"){ stopSync(); auth.signOut(); return; }
+  if(a==="tab"){ VIEW=el.dataset.v; detailId=null; editZeitId=null; editDienstId=null; return render(); }
+  if(a==="week"){ weekOffset = el.dataset.d==="0"?0:weekOffset+Number(el.dataset.d); return render(); }
+  if(a==="month"){ monthOffset+=Number(el.dataset.d); return render(); }
+
+  if(a==="dienst-new"){ uiNewDate=el.dataset.datum; editDienstId=null; render(); scrollTo_("d_datum"); return; }
+  if(a==="dienst-edit"){ editDienstId=id; render(); scrollTo_("d_datum"); return; }
+  if(a==="dienst-zurueck"){ editDienstId=null; return render(); }
+  if(a==="dienst-abbruch"){ editDienstId=null; return render(); }
+  if(a==="dienst-save") return dienstSave();
+  if(a==="dienst-del") return dienstDel(id);
+
+  if(a==="tausch-an"){ save("dienste/"+id+"/tausch",true); return render(); }
+  if(a==="tausch-zurueck"){ save("dienste/"+id+"/tausch",false); return render(); }
+  if(a==="tausch-nehmen") return tauschNehmen(id);
+
+  if(a==="ende-plus") return endePlus();
+  if(a==="zeit-save") return zeitSave();
+  if(a==="zeit-edit"){ editZeitId=id; VIEW="zeit"; return render(); }
+  if(a==="zeit-abbruch"){ editZeitId=null; return render(); }
+
+  if(a==="detail"){ detailId=id; editZeitId=null; return render(); }
+  if(a==="detail-zu"){ detailId=null; editZeitId=null; return render(); }
+  if(a==="a-zeit-edit"){ editZeitId=id; render(); scrollTo_("a_datum"); return; }
+  if(a==="a-zeit-del"){ if(confirm("Eintrag löschen?")){ del("zeiten/"+id); render(); } return; }
+  if(a==="a-zeit-save") return adminZeitSave();
+  if(a==="ma-save") return maSave(id);
+  if(a==="ma-edit"){ uiEditMa=id; render(); scrollTo_("m_name"); return; }
+  if(a==="ma-abbruch"){ uiEditMa=""; return render(); }
+  if(a==="code-neu"){ uiNeuerCode=freierCode(); return render(); }
+  if(a==="ma-del") return maDel(id);
+  if(a==="hin-del"){ del("hinweise/"+id); return render(); }
+  if(a==="set-save") return setSave();
+  if(a==="tage-save") return tageSave();
+  if(a==="pw-save") return pwSave();
+  if(a==="csv") return csvExport();
+  if(a==="print") return printZettel(id);
+  if(a==="backup") return backup();
+});
+document.addEventListener("input", ev=>{
+  if(ev.target.matches("[data-live]")){
+    if(ev.target.id==="z_von"||ev.target.id==="z_bis") pauseSetzen();
+    liveCalc();
+  }
+  if(ev.target.id==="bfilter"){ uiFilter=ev.target.value; render(); }
+  if(ev.target.id==="sort_ueb"){ uiSortUeb=ev.target.value; render(); }
+  if(ev.target.id==="sort_ma"){ uiSortMa=ev.target.value; render(); }
+  if(ev.target.id==="m_art") artUmschalten();
+});
+document.addEventListener("keydown", ev=>{
+  if(ev.key!=="Enter") return;
+  if(ev.target.id==="pin") pinLogin();
+  if(ev.target.id==="l_pw"||ev.target.id==="l_mail") leitungLogin();
+});
+function scrollTo_(elId){
+  const f=document.getElementById(elId); if(!f) return;
+  const karte=f.closest(".card")||f;
+  try{ karte.scrollIntoView({block:"start",behavior:"smooth"}); }
+  catch(e){ karte.scrollIntoView(); }
+}
+
+function dienstSave(){
+  const admin=SESSION.role==="admin";
+  const maId=admin?document.getElementById("d_ma").value:SESSION.id;
+  const datum=document.getElementById("d_datum").value;
+  const von=document.getElementById("d_von").value;
+  const bereich=document.getElementById("d_bereich").value;
+  const notiz=document.getElementById("d_notiz").value.trim();
+  if(!maId||!datum||!von){ setFlash("err","Bitte Mitarbeiter, Datum und Beginn angeben."); return render(); }
+  const alt=editDienstId?DATA.dienste[editDienstId]:null;
+  if(alt&&!admin&&alt.maId!==SESSION.id){ setFlash("err","Diesen Dienst kannst du nicht ändern."); editDienstId=null; return render(); }
+  const obj={maId,datum,von,bereich,notiz,tausch:alt?!!alt.tausch:false};
+  const id=editDienstId||uid();
+  editDienstId=null; uiNewDate=datum;
+  save("dienste/"+id,obj);
+  if(!admin&&alt&&(alt.datum!==datum||dienstZeit(alt)!==von||bereichVonDienst(alt)!==bereich)){
+    const n=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
+    save("hinweise/"+uid(),{text:`Dienst geändert: ${n} – vorher ${dLabel(alt.datum)} ${dienstLabel(alt)} ${bereichVonDienst(alt)}, jetzt ${dLabel(datum)} ab ${von} ${bereich}.`, ts:Date.now()});
+  }
+  setFlash("ok","Dienst gespeichert."); render();
+}
+function dienstDel(id){
+  const d=DATA.dienste[id]; if(!d) return;
+  const admin=SESSION.role==="admin";
+  if(!admin&&d.maId!==SESSION.id){ setFlash("err","Diesen Dienst kannst du nicht löschen."); return render(); }
+  if(!confirm("Diesen Dienst löschen?")) return;
+  editDienstId=null;
+  del("dienste/"+id);
+  if(!admin){
+    const n=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
+    save("hinweise/"+uid(),{text:`Dienst gelöscht: ${n} am ${dLabel(d.datum)} (${dienstLabel(d)}, ${bereichVonDienst(d)}).`, ts:Date.now()});
+  }
+  render();
+}
+function tauschNehmen(id){
+  const d=DATA.dienste[id]; if(!d) return;
+  const alt=(DATA.mitarbeiter[d.maId]||{}).name||"?";
+  const neu=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
+  if(!confirm(`Dienst am ${dLabel(d.datum)} (${dienstLabel(d)}, ${bereichVonDienst(d)}) übernehmen?`)) return;
+  save("dienste/"+id, Object.assign({},d,{maId:SESSION.id,tausch:false}));
+  save("hinweise/"+uid(), {text:`Diensttausch: ${neu} übernimmt den Dienst von ${alt} am ${dLabel(d.datum)} (${dienstLabel(d)}).`, ts:Date.now()});
+  setFlash("ok","Dienst übernommen."); render();
+}
+function pruefe(von,bis,pause){
+  if(!von||!bis) return "Bitte Beginn und Ende eintragen.";
+  const br=dauer(von,bis);
+  if(br<=0) return "Die Zeitspanne ergibt keine Arbeitszeit.";
+  if(br>16*60) return "Mehr als 16 Stunden am Stück sind nicht plausibel. Bitte prüfen.";
+  const ne=br-pause;
+  if(ne<=0) return "Die Pause ist länger als die Anwesenheit.";
+  const soll=pflichtPause(ne);
+  if(pause<soll) return `Bei ${hhmm(ne)} Stunden Arbeitszeit sind mindestens ${soll} Minuten Pause vorgeschrieben.`;
+  return null;
+}
+function zeitSave(){
+  const datum=document.getElementById("z_datum").value;
+  const von=document.getElementById("z_von").value, bis=document.getElementById("z_bis").value;
+  const pause=Math.max(0,Number(document.getElementById("z_pause").value||0));
+  const f=pruefe(von,bis,pause);
+  if(f){ setFlash("err",f); return render(); }
+  if(!nachtragOK(datum)){ setFlash("err","Nur heute und gestern sind möglich."); return render(); }
+  const id=editZeitId||uid();
+  const alt=editZeitId?DATA.zeiten[editZeitId]:null;
+  save("zeiten/"+id,{maId:SESSION.id,datum,von,bis,pause,erfasst:Date.now(),korr:!!alt});
+  if(alt){
+    const n=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
+    save("hinweise/"+uid(),{text:`Korrektur: ${n} am ${dLabel(datum)} – vorher ${alt.von}–${alt.bis} (Pause ${alt.pause||0}), jetzt ${von}–${bis} (Pause ${pause}).`, ts:Date.now()});
+  }
+  editZeitId=null; VIEW="meine"; setFlash("ok","Zeit gespeichert."); render();
+}
+function adminZeitSave(){
+  const datum=document.getElementById("a_datum").value;
+  const von=document.getElementById("a_von").value, bis=document.getElementById("a_bis").value;
+  const pause=Math.max(0,Number(document.getElementById("a_pause").value||0));
+  const f=pruefe(von,bis,pause);
+  if(f){ setFlash("err",f); return render(); }
+  const id=editZeitId||uid();
+  save("zeiten/"+id,{maId:detailId,datum,von,bis,pause,erfasst:Date.now(),korr:!!editZeitId});
+  editZeitId=null; setFlash("ok","Gespeichert."); render();
+}
+async function maSave(id){
+  const name=document.getElementById("m_name").value.trim();
+  const bereiche=Array.prototype.slice.call(document.querySelectorAll(".m_ber:checked")).map(x=>x.value);
+  const code=document.getElementById("m_code").value.trim();
+  const betrag=Number(document.getElementById("m_lohn").value||0);
+  const artFest=document.getElementById("m_art").value==="monat";
+  const artFest2=document.getElementById("m_art").value==="monat";
+  const minijob=artFest2?false:document.getElementById("m_mj").checked;
+  if(!name){ setFlash("err","Bitte einen Namen eintragen."); return render(); }
+  if(!/^\d{4}$/.test(code)){ setFlash("err","Der Zugangscode muss aus genau 4 Ziffern bestehen."); return render(); }
+  if(maList().some(m=>m.id!==id && codeVon(m.id)===code)){ setFlash("err","Diesen Code hat schon jemand."); return render(); }
+  const maId=id||uid();
+  const alterCode=id?codeVon(id):"";
+  BUSY=true; render();
+  try{
+    if(code!==alterCode){
+      const neueUid=await zugangAnlegen(code);
+      await fs.collection(COLL.uidmap).doc(neueUid).set({maId});
+      const alteUid=(DATA.privat[maId]||{}).authUid;
+      if(alteUid&&alteUid!==neueUid){ try{ await fs.collection(COLL.uidmap).doc(alteUid).delete(); }catch(e){} }
+      save("privat/"+maId,{code,fest:artFest,lohn:artFest?0:betrag,authUid:neueUid});
+    }else{
+      save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,fest:artFest,lohn:artFest?0:betrag}));
+    }
+    save("mitarbeiter/"+maId,{name,bereiche,minijob});
+    uiEditMa=""; uiNeuerCode="";
+    setFlash("ok","Mitarbeiter gespeichert.");
+  }catch(e){ fehler(e); }
+  BUSY=false; render();
+}
+async function maDel(id){
+  const m=DATA.mitarbeiter[id]; if(!m) return;
+  const anz=zeitList().filter(z=>z.maId===id).length;
+  if(!confirm(`${m.name} löschen? Der Zugang wird sofort gesperrt.${anz>0?" "+anz+" Zeiteinträge bleiben für die Abrechnung erhalten.":""}`)) return;
+  const authUid=(DATA.privat[id]||{}).authUid;
+  if(authUid && fs){ try{ await fs.collection(COLL.uidmap).doc(authUid).delete(); }catch(e){ fehler(e); } }
+  del("privat/"+id); del("mitarbeiter/"+id); render();
+}
+function setSave(){
+  const abg=Number(document.getElementById("s_abg").value);
+  const gr=Number(document.getElementById("s_grenze").value);
+  save("meta",Object.assign({},DATA.meta,{abgaben:isNaN(abg)?DEFAULT_ABGABEN:abg, grenze:isNaN(gr)||gr<=0?MINIJOB_GRENZE:gr}));
+  setFlash("ok","Gespeichert."); render();
+}
+function tageSave(){
+  const tage=Array.prototype.slice.call(document.querySelectorAll(".s_tag:checked")).map(x=>Number(x.value));
+  if(!tage.length){ setFlash("err","Mindestens ein Tag muss offen sein."); return render(); }
+  save("kalender",{tage});
+  setFlash("ok","Öffnungstage gespeichert."); render();
+}
+function pwSave(){
+  const pw=document.getElementById("s_pw").value;
+  if(pw.length<6){ setFlash("err","Das Passwort braucht mindestens 6 Zeichen."); return render(); }
+  auth.currentUser.updatePassword(pw)
+    .then(()=>{ setFlash("ok","Passwort geändert."); render(); })
+    .catch(e=>{ setFlash("err", e.code==="auth/requires-recent-login"
+      ? "Bitte einmal ab- und wieder anmelden, dann geht es." : fbText(e)); render(); });
+}
+
+/* ---------- Export ---------- */
+function csvExport(){
+  const mk=monatKey(monthOffset);
+  const rows=[["Mitarbeiter","Bereich","Datum","Von","Bis","Pause Min","Stunden","Stundenlohn","Betrag"]];
+  zeitList().filter(z=>z.datum.startsWith(mk)).sort((a,b)=>a.datum.localeCompare(b.datum)).forEach(z=>{
+    const m=DATA.mitarbeiter[z.maId]||{name:"unbekannt"};
+    const h=std(netto(z)), f=istFest(z.maId), l=lohnVon(z.maId);
+    rows.push([m.name,bereichText(m),dParse(z.datum).toLocaleDateString("de-DE"),z.von,z.bis,z.pause||0,num(h),
+      f?"festangestellt":num(l), f?"":num(h*l)]);
+  });
+  const csv="\uFEFF"+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\r\n");
+  lade(new Blob([csv],{type:"text/csv"}),"stunden_"+mk+".csv");
+}
+function printZettel(id){
+  const m=DATA.mitarbeiter[id]; if(!m) return;
+  const mk=monatKey(monthOffset);
+  const zs=zeitList().filter(z=>z.maId===id&&z.datum.startsWith(mk)).sort((a,b)=>a.datum.localeCompare(b.datum)||min(a.von)-min(b.von));
+  const sum=zs.reduce((s,z)=>s+netto(z),0);
+  document.getElementById("printArea").innerHTML=`
+    <h2 style="font-family:sans-serif">Stundennachweis ${monatLabel(monthOffset)}</h2>
+    <p style="font-family:sans-serif">${esc(m.name)} · ${esc(bereichText(m))}</p>
+    <table><thead><tr><th>Datum</th><th>Von</th><th>Bis</th><th>Pause</th><th>Stunden</th></tr></thead><tbody>
+    ${zs.map(z=>`<tr><td>${dParse(z.datum).toLocaleDateString("de-DE")} (${WT[dParse(z.datum).getDay()]})</td>
+      <td>${esc(z.von)}</td><td>${esc(z.bis)}</td><td>${z.pause||0} Min</td><td>${num(std(netto(z)))}</td></tr>`).join("")}
+    <tr><th colspan="4">Summe</th><th>${num(std(sum))} Std</th></tr></tbody></table>
+    <div class="sign"><div>Datum, Unterschrift Mitarbeiter</div><div>Datum, Unterschrift Arbeitgeber</div></div>`;
+  window.print();
+}
+function backup(){
+  lade(new Blob([JSON.stringify(DATA,null,2)],{type:"application/json"}),"zeiterfassung_backup_"+heute()+".json");
+}
+function lade(blob,name){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+start();
+</script>
+</body>
+</html>
