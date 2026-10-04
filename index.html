@@ -34,6 +34,7 @@ nav.tabs button[aria-current="true"]{background:var(--accent);border-color:var(-
 .card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin:12px 0}
 .card.flat{padding:0;overflow:hidden}
 label{display:block;font-size:13px;font-weight:600;color:var(--ink2);margin:10px 0 4px}
+textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font:400 14px ui-monospace,Menlo,Consolas,monospace;background:#fff;color:var(--ink);resize:vertical}
 input,select{width:100%;padding:11px 10px;border:1px solid var(--line);border-radius:8px;font:400 16px Nunito;background:#fff;color:var(--ink)}
 input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent2);outline-offset:1px}
 .row{display:flex;gap:8px}
@@ -156,7 +157,7 @@ let SESSION=null, AUTHREADY=false, BUSY=false;
 let VIEW="", weekOffset=0, monthOffset=0, detailId=null;
 let editZeitId=null, editDienstId=null;
 let uiFilter="", uiNewDate="", uiEditMa="", uiLeitungForm=false, uiSetupUid="";
-let uiSortUeb="name", uiSortMa="name", uiNeuerCode="";
+let uiSortUeb="name", uiSortMa="name", uiNeuerCode="", uiImportText="", uiImportZeilen=null;
 let flash=null, flashT=null, unsubs=[];
 
 function setFlash(t,m){ flash={t,m}; clearTimeout(flashT); flashT=setTimeout(()=>{flash=null;render();},5000); }
@@ -338,6 +339,12 @@ function istFest(maId){ return !!(DATA.privat[maId]||{}).fest; }
 function kostenVon(maId,minuten){ return istFest(maId) ? 0 : std(minuten)*lohnVon(maId); }
 function tageOffen(){ return Array.isArray(DATA.kalender.tage) ? DATA.kalender.tage : STD_TAGE; }
 function codeVon(maId){ return (DATA.privat[maId]||{}).code||""; }
+function persNr(maId){ return (DATA.privat[maId]||{}).persnr||""; }
+function namensteile(n){
+  const t=String(n||"").trim().split(/\s+/);
+  if(t.length<2) return {vor:t[0]||"", nach:""};
+  return {nach:t[t.length-1], vor:t.slice(0,-1).join(" ")};
+}
 function abgSatz(){ return DATA.meta.abgaben===undefined?DEFAULT_ABGABEN:Number(DATA.meta.abgaben); }
 function grenze(){ return DATA.meta.grenze===undefined?MINIJOB_GRENZE:Number(DATA.meta.grenze); }
 function nachtragOK(datum){ return datum===heute()||datum===gestern(); }
@@ -366,7 +373,7 @@ function render(){
   if(!AUTHREADY){ return; }
   if(!SESSION){ r.innerHTML=loginView(); const f=document.getElementById("pin"); if(f&&!uiLeitungForm) f.focus(); return; }
   const tabs = SESSION.role==="admin"
-    ? [["ueb","Übersicht"],["plan","Dienstplan"],["ma","Mitarbeiter"],["hin","Hinweise"],["set","Einstellungen"]]
+    ? [["ueb","Übersicht"],["plan","Dienstplan"],["ma","Mitarbeiter"],["imp","Import"],["hin","Hinweise"],["set","Einstellungen"]]
     : [["plan","Dienstplan"],["zeit","Zeit eintragen"],["meine","Meine Stunden"],["tausch","Tausch"]];
   if(!tabs.some(t=>t[0]===VIEW)) VIEW=tabs[0][0];
   const me = SESSION.role==="ma" ? (DATA.mitarbeiter[SESSION.id]||{name:"…"}) : null;
@@ -391,6 +398,7 @@ function body(){
     if(VIEW==="ueb") return detailId?adminDetail():adminUeb();
     if(VIEW==="plan") return planView(true);
     if(VIEW==="ma") return adminMa();
+    if(VIEW==="imp") return adminImport();
     if(VIEW==="hin") return adminHin();
     if(VIEW==="set") return adminSet();
   }else{
@@ -666,8 +674,9 @@ function adminUeb(){
         <div class="val">${num(std(r.mm))} Std<small>${r.fest?"festangestellt":eur(r.lohn)}</small></div></li>`;
     }).join("")}
   </ul></div>
-  <button class="btn sec" data-act="csv">CSV-Export ${monatLabel(monthOffset)}</button>
-  <p class="hint">Tippe auf einen Namen für die Einzelansicht mit allen Tagen.</p>`;
+  <button class="btn sec" data-act="csv-lohn">Lohn-Export ${monatLabel(monthOffset)} – Monatssummen</button>
+  <button class="btn ghost" data-act="csv">Detail-Export – alle einzelnen Tage</button>
+  <p class="hint">Der Lohn-Export enthält eine Zeile je Mitarbeiter und ist für die Lohnbuchhaltung gedacht. Tippe auf einen Namen für die Einzelansicht.</p>`;
 }
 function adminDetail(){
   const m=DATA.mitarbeiter[detailId]; if(!m){ detailId=null; return adminUeb(); }
@@ -735,6 +744,8 @@ function adminMa(){
           <option value="monat" ${fest?"selected":""}>Festangestellt (nur Zeiterfassung)</option>
         </select></div>
     </div>
+    <label for="m_persnr">Personalnummer (optional, für den Lohn-Export)</label>
+    <input id="m_persnr" inputmode="numeric" value="${e?esc(persNr(uiEditMa)):""}" placeholder="z. B. 1007">
     <div id="m_lohn_row" style="display:${fest?"none":"block"}">
       <label for="m_lohn" id="m_lohn_label">Stundenlohn €</label>
       <input id="m_lohn" type="number" step="0.01" inputmode="decimal" value="${e&&!fest?esc(lohnVon(uiEditMa)||""):""}" placeholder="13.50">
@@ -773,6 +784,71 @@ function artUmschalten(){
   if(lohnRow) lohnRow.style.display = fest ? "none" : "block";
   if(row) row.style.display = fest ? "none" : "flex";
   if(fest&&mj) mj.checked=false;
+}
+function nameIndex(){
+  const idx={};
+  maList().forEach(m=>{
+    const voll=(m.name||"").trim().toLowerCase();
+    if(voll) idx[voll]=idx[voll]===undefined?m.id:"mehrfach";
+    const vor=voll.split(/\s+/)[0];
+    if(vor&&vor!==voll) idx[vor]=idx[vor]===undefined?m.id:"mehrfach";
+  });
+  return idx;
+}
+function importParsen(){
+  const idx=nameIndex();
+  const vorhanden=dienstList();
+  return uiImportText.split("\n").map(z=>z.trim()).filter(z=>z&&z[0]!=="#").map(z=>{
+    const t=z.split(/[;\t]/).map(x=>x.trim());
+    const r={roh:z, status:"fehler", hinweis:"Format nicht erkannt"};
+    if(t.length<2) return r;
+    const dm=t[0].match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    const di=t[0].match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(dm) r.datum=dm[3]+"-"+pad(Number(dm[2]))+"-"+pad(Number(dm[1]));
+    else if(di) r.datum=t[0];
+    else { r.hinweis="Datum nicht lesbar"; return r; }
+    r.name=t[1];
+    const zt=(t[2]||"").replace(/\s*Uhr\s*/i,"").replace(",",":").trim();
+    const zm=zt.match(/^(\d{1,2})[:.](\d{2})$/)||zt.match(/^(\d{1,2})$/);
+    r.von = zm ? pad(Number(zm[1]))+":"+pad(Number(zm[2]||0)) : "17:00";
+    const treffer=idx[r.name.toLowerCase()];
+    if(treffer===undefined){ r.status="unbekannt"; r.hinweis="Name nicht gefunden"; return r; }
+    if(treffer==="mehrfach"){ r.status="unbekannt"; r.hinweis="Name mehrfach vorhanden"; return r; }
+    r.maId=treffer;
+    r.bereich=t[3]||bereicheVon(DATA.mitarbeiter[treffer])[0]||PLAN_BEREICHE[0];
+    if(vorhanden.some(d=>d.maId===r.maId&&d.datum===r.datum&&dienstZeit(d)===r.von)){
+      r.status="doppelt"; r.hinweis="steht schon im Plan"; return r;
+    }
+    r.status="neu"; r.hinweis=dLabel(r.datum)+" · ab "+r.von+" · "+r.bereich;
+    return r;
+  });
+}
+function adminImport(){
+  const z=uiImportZeilen;
+  const neu=z?z.filter(x=>x.status==="neu").length:0;
+  return `<div class="card">
+    <h2>Dienstplan übernehmen</h2>
+    <p class="hint">Eine Zeile pro Dienst, Felder mit Semikolon getrennt:<br>
+      <b>Datum; Name; Beginn; Bereich</b><br>
+      Beispiel: 01.10.2026; Rosalie; 17:30; Service<br>
+      Bereich darf fehlen – dann wird der beim Mitarbeiter hinterlegte genommen. Fehlt die Uhrzeit, wird 17:00 gesetzt.</p>
+    <textarea id="imp_text" rows="8" spellcheck="false">${esc(uiImportText)}</textarea>
+    <button class="btn sec" data-act="imp-pruefen">Prüfen</button>
+    ${z?`<div class="card flat" style="margin-top:12px"><ul class="list">
+      ${z.map(x=>`<li>
+        <div class="main"><b>${esc(x.name||x.roh)}</b><span>${esc(x.hinweis)}</span></div>
+        <div class="val"><span class="tag" style="${x.status==="neu"?"background:#e3f1e8;color:#2e7d4f":(x.status==="doppelt"?"":"background:#fbeceb;color:#b3261e")}">${x.status==="neu"?"neu":(x.status==="doppelt"?"doppelt":"Fehler")}</span></div>
+      </li>`).join("")}
+    </ul></div>
+    ${neu?`<button class="btn" data-act="imp-start">${neu} Dienste anlegen</button>`:`<p class="hint">Nichts Neues zum Anlegen.</p>`}`:""}
+  </div>`;
+}
+function importStart(){
+  const z=(uiImportZeilen||[]).filter(x=>x.status==="neu");
+  z.forEach(x=>save("dienste/"+uid(),{maId:x.maId,datum:x.datum,von:x.von,bereich:x.bereich,notiz:"",tausch:false}));
+  uiImportZeilen=null; uiImportText="";
+  setFlash("ok",z.length+" Dienste angelegt.");
+  VIEW="plan"; render();
 }
 function adminHin(){
   const hs=Object.keys(DATA.hinweise).map(id=>Object.assign({id},DATA.hinweise[id])).sort((a,b)=>b.ts-a.ts);
@@ -856,10 +932,13 @@ document.addEventListener("click", ev=>{
   if(a==="code-neu"){ uiNeuerCode=freierCode(); return render(); }
   if(a==="ma-del") return maDel(id);
   if(a==="hin-del"){ del("hinweise/"+id); return render(); }
+  if(a==="imp-pruefen"){ uiImportText=document.getElementById("imp_text").value; uiImportZeilen=importParsen(); return render(); }
+  if(a==="imp-start") return importStart();
   if(a==="set-save") return setSave();
   if(a==="tage-save") return tageSave();
   if(a==="pw-save") return pwSave();
   if(a==="csv") return csvExport();
+  if(a==="csv-lohn") return lohnExport();
   if(a==="print") return printZettel(id);
   if(a==="backup") return backup();
 });
@@ -969,6 +1048,7 @@ async function maSave(id){
   const bereiche=Array.prototype.slice.call(document.querySelectorAll(".m_ber:checked")).map(x=>x.value);
   const code=document.getElementById("m_code").value.trim();
   const betrag=Number(document.getElementById("m_lohn").value||0);
+  const persnr=document.getElementById("m_persnr").value.trim();
   const artFest=document.getElementById("m_art").value==="monat";
   const artFest2=document.getElementById("m_art").value==="monat";
   const minijob=artFest2?false:document.getElementById("m_mj").checked;
@@ -984,9 +1064,9 @@ async function maSave(id){
       await fs.collection(COLL.uidmap).doc(neueUid).set({maId});
       const alteUid=(DATA.privat[maId]||{}).authUid;
       if(alteUid&&alteUid!==neueUid){ try{ await fs.collection(COLL.uidmap).doc(alteUid).delete(); }catch(e){} }
-      save("privat/"+maId,{code,fest:artFest,lohn:artFest?0:betrag,authUid:neueUid});
+      save("privat/"+maId,{code,persnr,fest:artFest,lohn:artFest?0:betrag,authUid:neueUid});
     }else{
-      save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,fest:artFest,lohn:artFest?0:betrag}));
+      save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,persnr,fest:artFest,lohn:artFest?0:betrag}));
     }
     save("mitarbeiter/"+maId,{name,bereiche,minijob});
     uiEditMa=""; uiNeuerCode="";
@@ -1036,6 +1116,26 @@ function csvExport(){
   });
   const csv="\uFEFF"+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\r\n");
   lade(new Blob([csv],{type:"text/csv"}),"stunden_"+mk+".csv");
+}
+function lohnExport(){
+  const mk=monatKey(monthOffset);
+  const d=new Date(Number(mk.slice(0,4)), Number(mk.slice(5,7))-1, 1);
+  const letzter=new Date(d.getFullYear(), d.getMonth()+1, 0);
+  const von=dParse(mk+"-01").toLocaleDateString("de-DE");
+  const bis=letzter.toLocaleDateString("de-DE");
+  const rows=[["Personalnummer","Nachname","Vorname","Abrechnungsmonat","Zeitraum von","Zeitraum bis",
+               "Lohnart","Stunden","Stundenlohn","Bruttolohn","Beschaeftigung"]];
+  maList().forEach(m=>{
+    const mm=monatMin(m.id,mk);
+    if(mm===0) return;
+    const n=namensteile(m.name), f=istFest(m.id), h=std(mm);
+    rows.push([persNr(m.id), n.nach, n.vor, pad(d.getMonth()+1)+"."+d.getFullYear(), von, bis,
+      f?"Stunden (Festgehalt)":"Stundenlohn", num(h), f?"":num(lohnVon(m.id)), f?"":num(h*lohnVon(m.id)),
+      f?"festangestellt":"Minijob"]);
+  });
+  if(rows.length===1){ setFlash("err","Für diesen Monat sind keine Stunden erfasst."); return render(); }
+  const csv="\uFEFF"+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\r\n");
+  lade(new Blob([csv],{type:"text/csv"}),"lohn_"+mk+".csv");
 }
 function printZettel(id){
   const m=DATA.mitarbeiter[id]; if(!m) return;
