@@ -384,7 +384,7 @@ function lohnVon(maId){ return Number((DATA.privat[maId]||{}).lohn||0); }
 function istFest(maId){ return !!(DATA.privat[maId]||{}).fest; }
 function kostenVon(maId,minuten){ return istFest(maId) ? 0 : std(minuten)*lohnVon(maId); }
 function tageOffen(){ return Array.isArray(DATA.kalender.tage) ? DATA.kalender.tage : STD_TAGE; }
-function codeVon(maId){ return (DATA.privat[maId]||{}).code||""; }
+function codeVon(maId){ const c=(DATA.privat[maId]||{}).code; return c===undefined||c===null?"":String(c).trim(); }   // Code immer als Text, auch wenn er in Firebase als Zahl steht
 function persNr(maId){ return (DATA.privat[maId]||{}).persnr||""; }
 function namensteile(n){
   const t=String(n||"").trim().split(/\s+/);
@@ -1147,12 +1147,11 @@ function adminZeitSave(){
 async function maSave(id){
   const name=document.getElementById("m_name").value.trim();
   const bereiche=Array.prototype.slice.call(document.querySelectorAll(".m_ber:checked")).map(x=>x.value);
-  const code=document.getElementById("m_code").value.trim();
+  const code=String(document.getElementById("m_code").value||"").trim();
   const betrag=Number(document.getElementById("m_lohn").value||0);
   const persnr=document.getElementById("m_persnr").value.trim();
   const artFest=document.getElementById("m_art").value==="monat";
-  const artFest2=document.getElementById("m_art").value==="monat";
-  const minijob=artFest2?false:document.getElementById("m_mj").checked;
+  const minijob=artFest?false:document.getElementById("m_mj").checked;
   const stufeEl=document.querySelector('input[name="m_stufe"]:checked');
   const stufe=(bereiche.indexOf(SERVICE)>=0&&stufeEl)?stufeEl.value:"";
   if(!name){ setFlash("err","Bitte einen Namen eintragen."); return render(); }
@@ -1160,23 +1159,42 @@ async function maSave(id){
   if(maList().some(m=>m.id!==id && codeVon(m.id)===code)){ setFlash("err","Diesen Code hat schon jemand."); return render(); }
   const maId=id||uid();
   const alterCode=id?codeVon(id):"";
-  BUSY=true; render();
-  try{
-    if(code!==alterCode){
-      const neueUid=await zugangAnlegen(code);
-      await fs.collection(COLL.uidmap).doc(neueUid).set({maId});
-      const alteUid=(DATA.privat[maId]||{}).authUid;
-      if(alteUid&&alteUid!==neueUid){ try{ await fs.collection(COLL.uidmap).doc(alteUid).delete(); }catch(e){} }
-      save("privat/"+maId,{code,persnr,fest:artFest,lohn:artFest?0:betrag,authUid:neueUid});
-    }else{
-      save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,persnr,fest:artFest,lohn:artFest?0:betrag}));
-    }
-    const maDoc={name,bereiche,minijob};
-    if(stufe) maDoc.stufe=stufe;
+  const codeNeu=(code!==alterCode);
+  const maDoc={name,bereiche,minijob};
+  if(stufe) maDoc.stufe=stufe;
+  const privAlt=DATA.privat[maId]||{};
+
+  /* Bestehender Mitarbeiter, Code unverändert: Zugang wird nicht angefasst. */
+  if(!codeNeu){
     save("mitarbeiter/"+maId,maDoc);
+    save("privat/"+maId,Object.assign({},privAlt,{code,persnr,fest:artFest,lohn:artFest?0:betrag}));
     uiEditMa=""; uiNeuerCode="";
     setFlash("ok","Mitarbeiter gespeichert.");
-  }catch(e){ fehler(e); }
+    return render();
+  }
+
+  /* Neuer Code: erst die Stammdaten sichern (bei bestehenden Mitarbeitern), dann den Zugang anlegen. */
+  if(id){
+    save("mitarbeiter/"+maId,maDoc);
+    save("privat/"+maId,Object.assign({},privAlt,{persnr,fest:artFest,lohn:artFest?0:betrag}));
+  }
+  BUSY=true; render();
+  try{
+    const neueUid=await zugangAnlegen(code);
+    await fs.collection(COLL.uidmap).doc(neueUid).set({maId});
+    const alteUid=privAlt.authUid;
+    if(alteUid&&alteUid!==neueUid){ try{ await fs.collection(COLL.uidmap).doc(alteUid).delete(); }catch(e){} }
+    if(!id) save("mitarbeiter/"+maId,maDoc);
+    save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,persnr,fest:artFest,lohn:artFest?0:betrag,authUid:neueUid}));
+    uiEditMa=""; uiNeuerCode="";
+    setFlash("ok","Mitarbeiter gespeichert.");
+  }catch(e){
+    const c=e&&e.code||"";
+    const belegt=(c==="auth/invalid-credential"||c==="auth/wrong-password"||c==="auth/invalid-login-credentials"||c==="auth/user-not-found");
+    const zusatz=id?" Alle anderen Angaben sind gespeichert, der bisherige Code"+(alterCode?" "+alterCode:"")+" gilt weiter.":"";
+    if(belegt) setFest("err","Der Code "+code+" ist in der Anmeldung schon anderweitig vergeben. Bitte einen anderen Code wählen."+zusatz);
+    else setFest("err","Der Zugangscode konnte nicht eingerichtet werden: "+fbText(e)+zusatz);
+  }
   BUSY=false; render();
 }
 async function maDel(id){
