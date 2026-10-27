@@ -64,6 +64,12 @@ button.mini.warn{color:var(--bad);border-color:#e6c6c3}
 .dayhead b{font-size:15px}
 .dayhead.today b{color:var(--accent)}
 .shift{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:7px 9px;border-radius:8px;background:#f6f2f3;margin-top:6px;font-size:14px}
+.planumschalter{display:flex;gap:6px;margin:0 0 10px}
+.planumschalter button{flex:1}
+.planumschalter button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.daybox.klick{cursor:pointer}
+.daybox.klick:active{background:#f6f2f3}
+.daybox .weiter{font-size:12px;color:var(--accent);font-weight:600}
 .shift.mine{background:#f0e4e9;border-left:4px solid var(--accent)}
 .shift.free{background:#fff6e5;border-left:4px solid var(--warn)}
 .shift .t{font-weight:700}
@@ -147,7 +153,7 @@ const COLL = {
 };
 const META_COLL = "zeit_meta", META_DOC = "main";          // Abgaben, nur Leitung
 const KAL_COLL  = "zeit_kalender", KAL_DOC = "main";       // Öffnungstage, alle lesen
-const STD_TAGE = [1,4,5,6,0];                              // Mo, Do, Fr, Sa, So
+const STD_TAGE = [4,5,6,0];                                // Do, Fr, Sa, So
 const WOCHE = [[1,"Montag"],[2,"Dienstag"],[3,"Mittwoch"],[4,"Donnerstag"],[5,"Freitag"],[6,"Samstag"],[0,"Sonntag"]];
 const BEREICHE = ["Service","Theke","Küche","Spüle","Reinigung","Büro","Springer"];
 const PLAN_BEREICHE = ["Service","Theke","Küche","Spüle","Springer"];   // nur diese im Dienstplan
@@ -166,7 +172,7 @@ const MINIJOB_GRENZE = 603;   // Stand 2026, in den Einstellungen änderbar
 let DATA = {mitarbeiter:{},privat:{},dienste:{},zeiten:{},hinweise:{},meta:{},kalender:{}};
 let fb=null, fs=null, auth=null;
 let SESSION=null, AUTHREADY=false, BUSY=false;
-let VIEW="", weekOffset=0, monthOffset=0, detailId=null;
+let VIEW="", weekOffset=0, monthOffset=0, detailId=null, planModus="woche", planMonat=0;
 let editZeitId=null, editDienstId=null;
 let uiFilter="", uiNewDate="", uiEditMa="", uiLeitungForm=false, uiSetupUid="";
 let uiSortUeb="name", uiSortMa="name", uiNeuerCode="", uiImportText="", uiImportZeilen=null;
@@ -489,13 +495,78 @@ function loginView(){
 }
 
 /* ---------- Dienstplan ---------- */
+function planUmschalter(){
+  return `<div class="planumschalter">
+    <button class="mini ${planModus==="woche"?"on":""}" data-act="plan-modus" data-d="woche">Woche</button>
+    <button class="mini ${planModus==="monat"?"on":""}" data-act="plan-modus" data-d="monat">Monat</button>
+  </div>`;
+}
+function wocheVon(datum){   // weekOffset der Woche, in der das Datum liegt
+  const mo=x=>{ const d=new Date(x); d.setHours(12,0,0,0); d.setDate(d.getDate()-(d.getDay()+6)%7); return d; };
+  return Math.round((mo(dParse(datum))-mo(new Date()))/(7*864e5));
+}
+function monatView(admin){
+  const mk=monatKey(planMonat), ds=dienstList(), offen=tageOffen();
+  const luecken=admin?besetzungsLuecken():[];
+  const j=Number(mk.slice(0,4)), m=Number(mk.slice(5,7));
+  const anz=new Date(j,m,0).getDate();
+  const tage=Array.from({length:anz},(_,i)=>mk+"-"+pad(i+1))
+    .filter(t=>offen.indexOf(dParse(t).getDay())>=0||ds.some(d=>d.datum===t));
+  return `${planUmschalter()}
+  <div class="navmonth">
+    <button class="mini" data-act="plan-monat" data-d="-1">‹ Monat</button>
+    <b>${monatLabel(planMonat)}</b>
+    <button class="mini" data-act="plan-monat" data-d="1">Monat ›</button>
+  </div>
+  <div class="card">
+    <label for="bfilter">Bereich</label>
+    <select id="bfilter">
+      <option value="">Alle Bereiche</option>
+      ${PLAN_BEREICHE.map(b=>`<option ${uiFilter===b?"selected":""}>${b}</option>`).join("")}
+    </select>
+    ${planMonat!==0?`<button class="btn ghost" data-act="plan-monat" data-d="0">Zum aktuellen Monat</button>`:""}
+    <div class="legende">
+      <span><span class="stufe erfahren"></span>Erfahrene Bedienung</span>
+      <span><span class="stufe neu"></span>Newcomer</span>
+      ${admin?`<span><span class="stufe offen"></span>nicht eingestuft</span>`:""}
+    </div>
+    <p class="hint">Tag antippen, um in der Wochenansicht einzutragen oder zu ändern.</p>
+  </div>
+  <div class="card flat">
+    ${tage.length===0?`<div class="daybox"><span class="muted">In diesem Monat ist kein Öffnungstag eingetragen.</span></div>`:""}
+    ${tage.map(t=>{
+      let liste=ds.filter(d=>d.datum===t);
+      if(uiFilter) liste=liste.filter(d=>bereichVonDienst(d)===uiFilter);
+      liste.sort((a,b)=>dienstSort(a)-dienstSort(b)||
+        bereichVonDienst(a).localeCompare(bereichVonDienst(b))||
+        ((DATA.mitarbeiter[a.maId]||{}).name||"").localeCompare((DATA.mitarbeiter[b.maId]||{}).name||""));
+      return `<div class="daybox klick" data-act="monat-tag" data-datum="${t}">
+        <div class="dayhead ${t===heute()?"today":""}">
+          <b>${dLabel(t)}${t===heute()?" · heute":""}</b><span class="weiter">Woche ›</span>
+        </div>
+        ${liste.length===0?`<span class="muted">niemand eingeteilt</span>`:liste.map(d=>monatZeile(d)).join("")}
+        ${admin?luecken.filter(l=>l.datum===t).map(l=>`<div class="luecke">⚠ ${schichtText(l.schicht)}: keine erfahrene Bedienung im Service</div>`).join(""):""}
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+function monatZeile(d){
+  const m=DATA.mitarbeiter[d.maId]||{name:"?"};
+  const mine=SESSION.role==="ma"&&d.maId===SESSION.id;
+  return `<div class="shift ${d.tausch?"free":(mine?"mine":"")}">
+    <span>${istService(d)?stufePunkt(d.maId):""}<span class="t">${esc(dienstLabel(d))}</span> ${esc(m.name)}
+      <span class="tag">${esc(bereichVonDienst(d))}</span>
+      ${d.tausch?`<span class="tag" style="background:#fff0d0;color:#7a5a10">Vertretung gesucht</span>`:""}
+      ${d.notiz?`<span class="tag">${esc(d.notiz)}</span>`:""}</span></div>`;
+}
 function planView(admin){
+  if(planModus==="monat") return monatView(admin);
   const alleTage=wochenTage(weekOffset), ds=dienstList();
   const offen=tageOffen();
   const luecken=admin?besetzungsLuecken():[];
   const tage=alleTage.filter(t=>offen.indexOf(dParse(t).getDay())>=0||ds.some(d=>d.datum===t));
   const von=dParse(alleTage[0]), bis=dParse(alleTage[6]);
-  return `
+  return `${planUmschalter()}
   <div class="navmonth">
     <button class="mini" data-act="week" data-d="-1">‹ Woche</button>
     <b>${pad(von.getDate())}.${pad(von.getMonth()+1)}. – ${pad(bis.getDate())}.${pad(bis.getMonth()+1)}.</b>
@@ -523,7 +594,7 @@ function planView(admin){
       liste.sort((a,b)=>dienstSort(a)-dienstSort(b)||
         bereichVonDienst(a).localeCompare(bereichVonDienst(b))||
         ((DATA.mitarbeiter[a.maId]||{}).name||"").localeCompare((DATA.mitarbeiter[b.maId]||{}).name||""));
-      return `<div class="daybox">
+      return `<div class="daybox" id="tag-${t}">
         <div class="dayhead ${t===heute()?"today":""}">
           <b>${dLabel(t)}${t===heute()?" · heute":""}</b>
           <button class="mini" data-act="dienst-new" data-datum="${t}">+ Dienst</button>
@@ -998,6 +1069,14 @@ document.addEventListener("click", ev=>{
   if(a==="zum-pin"){ uiLeitungForm=false; return render(); }
   if(a==="logout"){ stopSync(); auth.signOut(); return; }
   if(a==="tab"){ VIEW=el.dataset.v; detailId=null; editZeitId=null; editDienstId=null; return render(); }
+  if(a==="plan-modus"){ planModus=el.dataset.d; if(planModus==="monat") planMonat=0; render(); try{ window.scrollTo(0,0); }catch(x){} return; }
+  if(a==="plan-monat"){ planMonat = el.dataset.d==="0"?0:planMonat+Number(el.dataset.d); return render(); }
+  if(a==="monat-tag"){
+    const t=el.dataset.datum; weekOffset=wocheVon(t); planModus="woche"; render();
+    const box=document.getElementById("tag-"+t);
+    if(box){ box.scrollIntoView({block:"start"}); box.style.transition="background .6s"; box.style.background="#f0e4e9"; setTimeout(()=>{ box.style.background=""; },1200); }
+    return;
+  }
   if(a==="week"){ weekOffset = el.dataset.d==="0"?0:weekOffset+Number(el.dataset.d); return render(); }
   if(a==="month"){ monthOffset+=Number(el.dataset.d); return render(); }
 
