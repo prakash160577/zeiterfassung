@@ -317,6 +317,10 @@ function hhmm(m){ return Math.floor(m/60)+":"+pad(m%60); }
 function std(m){ return m/60; }
 function eur(n){ return n.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})+" €"; }
 function num(n,k){ k=(k===undefined?2:k); return n.toLocaleString("de-DE",{minimumFractionDigits:k,maximumFractionDigits:k}); }
+const MAX_TAG=600;   // höchstens 10 Std Arbeitszeit pro Tag (ohne Pausen), alle Einträge des Tages zusammen
+function tagesMinuten(maId,datum,ohneId){
+  return zeitList().filter(z=>z.maId===maId&&z.datum===datum&&z.id!==ohneId).reduce((s,z)=>s+netto(z),0);
+}
 function pflichtPause(netto){ return netto>540?45:(netto>360?30:0); }
 function autoPause(brutto){ return brutto<=360?0:(brutto<=570?30:45); }   // 6 h / 9 h Grenze
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -429,7 +433,7 @@ function render(){
   <header class="top">
     <div class="topbar">
       <div class="who">${SESSION.role==="admin"?"Leitung":esc(me.name)}
-        <small>${SESSION.role==="admin"?"Alle Mitarbeiter":esc(bereichText(me))+(stufeVon(SESSION.id)?" · "+STUFE_NAME[stufeVon(SESSION.id)]:"")}</small></div>
+        <small>${SESSION.role==="admin"?"Alle Mitarbeiter":(stufeVon(SESSION.id)&&bereicheVon(me).indexOf(SERVICE)>=0?stufePunkt(SESSION.id):"")+esc(bereichText(me))+(stufeVon(SESSION.id)?" · "+STUFE_NAME[stufeVon(SESSION.id)]:"")}</small></div>
       <button class="mini" data-act="logout">Abmelden</button>
     </div>
     <nav class="tabs">${tabs.map(t=>`<button data-act="tab" data-v="${t[0]}" aria-current="${VIEW===t[0]}">${t[1]}</button>`).join("")}</nav>
@@ -589,7 +593,7 @@ function zeitForm(){
   return `<div class="card">
     <h2>${z?"Eintrag korrigieren":"Arbeitszeit eintragen"}</h2>
     <label for="z_datum">Tag</label>
-    <select id="z_datum">
+    <select id="z_datum" data-live>
       <option value="${heute()}" ${d===heute()?"selected":""}>Heute · ${dLabel(heute())}</option>
       <option value="${gestern()}" ${d===gestern()?"selected":""}>Gestern · ${dLabel(gestern())}</option>
     </select>
@@ -625,6 +629,11 @@ function liveCalc(){
     const neuesEnde=zeitText(min(v)+br+ext);
     html+=`<br><span style="color:var(--accent)">Die Pause wird abgezogen. Wenn du ${hhmm(br)} Std arbeiten wolltest, muss das Ende ${ext} Minuten später stehen.</span>
       <br><button class="mini" data-act="ende-plus" style="margin-top:6px">Ende auf ${neuesEnde} setzen</button>`;
+  }
+  const dEl=document.getElementById("z_datum");
+  if(dEl&&SESSION&&SESSION.role!=="admin"){
+    const vorher=tagesMinuten(SESSION.id,dEl.value,editZeitId), ueber=vorher+ne-MAX_TAG;
+    if(ueber>0) html+=`<br><span style="color:var(--bad)"><b>Über 10 Stunden am Tag${vorher?" (mit deinen anderen Einträgen)":""}: ${hhmm(ueber)} Std werden nicht erfasst.</b></span>`;
   }
   el.innerHTML=html;
 }
@@ -1127,12 +1136,30 @@ function zeitSave(){
   if(!nachtragOK(datum)){ setFlash("err","Nur heute und gestern sind möglich."); return render(); }
   const id=editZeitId||uid();
   const alt=editZeitId?DATA.zeiten[editZeitId]:null;
-  save("zeiten/"+id,{maId:SESSION.id,datum,von,bis,pause,erfasst:Date.now(),korr:!!alt});
+  const nameMa=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
+  const vorher=tagesMinuten(SESSION.id,datum,editZeitId);
+  const ne=dauer(von,bis)-pause, ueber=vorher+ne-MAX_TAG;
+  let bisSpeichern=bis, gekappt="";
+  if(ueber>0){
+    const erlaubt=MAX_TAG-vorher;
+    save("hinweise/"+uid(),{text:`Über 10 Stunden: ${nameMa} am ${dLabel(datum)} – ${hhmm(ueber)} Std nicht erfasst (eingetragen ${von}–${bis}, Pause ${pause}${erlaubt>0?", gespeichert bis "+zeitText(min(von)+pause+erlaubt):", Eintrag nicht gespeichert"}${vorher?", weitere Einträge am Tag "+hhmm(vorher)+" Std":""}).`, ts:Date.now()});
+    if(erlaubt<=0){
+      if(alt) del("zeiten/"+id);
+      editZeitId=null; VIEW="meine";
+      setFest("err",`An diesem Tag sind schon 10 Stunden erfasst. Mehr als 10 Stunden Arbeit am Tag sind nicht erlaubt. Dieser Eintrag (${hhmm(ne)} Std) wurde nicht gespeichert. Bitte achte künftig darauf. Die Leitung ist informiert.`);
+      return render();
+    }
+    bisSpeichern=zeitText(min(von)+pause+erlaubt);
+    gekappt=`Du hast an diesem Tag ${hhmm(vorher+ne)} Std gearbeitet. Mehr als 10 Stunden sind nicht erlaubt. ${hhmm(ueber)} Std wurden nicht erfasst, gespeichert ist bis ${bisSpeichern}. Bitte achte künftig darauf. Die Leitung ist informiert.`;
+  }
+  save("zeiten/"+id,{maId:SESSION.id,datum,von,bis:bisSpeichern,pause,erfasst:Date.now(),korr:!!alt});
   if(alt){
     const n=(DATA.mitarbeiter[SESSION.id]||{}).name||"?";
-    save("hinweise/"+uid(),{text:`Korrektur: ${n} am ${dLabel(datum)} – vorher ${alt.von}–${alt.bis} (Pause ${alt.pause||0}), jetzt ${von}–${bis} (Pause ${pause}).`, ts:Date.now()});
+    save("hinweise/"+uid(),{text:`Korrektur: ${n} am ${dLabel(datum)} – vorher ${alt.von}–${alt.bis} (Pause ${alt.pause||0}), jetzt ${von}–${bisSpeichern} (Pause ${pause}).`, ts:Date.now()});
   }
-  editZeitId=null; VIEW="meine"; setFlash("ok","Zeit gespeichert."); render();
+  editZeitId=null; VIEW="meine";
+  if(gekappt) setFest("err",gekappt); else setFlash("ok","Zeit gespeichert.");
+  render();
 }
 function adminZeitSave(){
   const datum=document.getElementById("a_datum").value;
