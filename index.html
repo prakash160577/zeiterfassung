@@ -285,19 +285,23 @@ function zweitApp(){
   const vorhanden = firebase.apps.filter(a=>a.name==="anlegen")[0];
   return vorhanden || firebase.initializeApp(FIREBASE_CONFIG,"anlegen");
 }
+function mitFrist(p,ms,schritt){
+  return Promise.race([p,new Promise((_,rej)=>setTimeout(()=>{ const e=new Error("frist"); e.code="frist"; e.schritt=schritt; rej(e); },ms))]);
+}
 async function zugangAnlegen(code){
   const mail="code"+code+PIN_DOMAIN, pw=code+PIN_SALT;
   const app=zweitApp();
+  let id;
   try{
-    const c=await app.auth().createUserWithEmailAndPassword(mail,pw);
-    const id=c.user.uid; await app.auth().signOut(); return id;
+    const c=await mitFrist(app.auth().createUserWithEmailAndPassword(mail,pw),20000,"Zugang anlegen");
+    id=c.user.uid;
   }catch(e){
-    if(e.code==="auth/email-already-in-use"){
-      const c=await app.auth().signInWithEmailAndPassword(mail,pw);
-      const id=c.user.uid; await app.auth().signOut(); return id;
-    }
-    throw e;
+    if(e.code!=="auth/email-already-in-use") throw e;
+    const c=await mitFrist(app.auth().signInWithEmailAndPassword(mail,pw),20000,"Zugang prüfen");
+    id=c.user.uid;
   }
+  app.auth().signOut().catch(()=>{});   // nicht darauf warten
+  return id;
 }
 
 /* ==========================================================
@@ -1208,9 +1212,10 @@ async function maSave(id){
   BUSY=true; render();
   try{
     const neueUid=await zugangAnlegen(code);
-    await fs.collection(COLL.uidmap).doc(neueUid).set({maId});
+    /* Schreibvorgänge nicht abwarten: lokal sofort wirksam, Server bestätigt im Hintergrund (Fehler erscheinen als Meldung) */
+    fs.collection(COLL.uidmap).doc(neueUid).set({maId}).catch(fehler);
     const alteUid=privAlt.authUid;
-    if(alteUid&&alteUid!==neueUid){ try{ await fs.collection(COLL.uidmap).doc(alteUid).delete(); }catch(e){} }
+    if(alteUid&&alteUid!==neueUid) fs.collection(COLL.uidmap).doc(alteUid).delete().catch(()=>{});
     if(!id) save("mitarbeiter/"+maId,maDoc);
     save("privat/"+maId,Object.assign({},DATA.privat[maId]||{},{code,persnr,fest:artFest,lohn:artFest?0:betrag,authUid:neueUid}));
     uiEditMa=""; uiNeuerCode="";
@@ -1219,8 +1224,10 @@ async function maSave(id){
     const c=e&&e.code||"";
     const belegt=(c==="auth/invalid-credential"||c==="auth/wrong-password"||c==="auth/invalid-login-credentials"||c==="auth/user-not-found");
     const zusatz=id?" Alle anderen Angaben sind gespeichert, der bisherige Code"+(alterCode?" "+alterCode:"")+" gilt weiter.":"";
-    if(belegt) setFest("err","Der Code "+code+" ist in der Anmeldung schon anderweitig vergeben. Bitte einen anderen Code wählen."+zusatz);
+    if(c==="frist") setFest("err","Keine Antwort vom Server beim Schritt „"+e.schritt+"“. Bitte Internetverbindung prüfen und nochmal speichern."+zusatz);
+    else if(belegt) setFest("err","Der Code "+code+" ist in der Anmeldung schon anderweitig vergeben. Bitte einen anderen Code wählen."+zusatz);
     else setFest("err","Der Zugangscode konnte nicht eingerichtet werden: "+fbText(e)+zusatz);
+    try{ window.scrollTo(0,0); }catch(x){}
   }
   BUSY=false; render();
 }
