@@ -106,6 +106,21 @@ button.mini.warn{color:var(--bad);border-color:#e6c6c3}
 .banner{background:#fff6e5;border:1px solid #ecd9a8;color:#6b5316;padding:10px 12px;border-radius:8px;font-size:13px;margin:12px 0}
 .code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;word-break:break-all;background:#f2eef0;padding:8px;border-radius:6px;display:block;margin-top:6px}
 #printArea{display:none}
+#printArea.plan table{width:100%;border-collapse:collapse}
+#printArea.plan{font-family:Arial,Helvetica,sans-serif;font-size:8pt;color:#000}
+#printArea.plan .kopf{display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #000;margin-bottom:4px}
+#printArea.plan h1{font-size:15pt;margin:0}
+#printArea.plan .leg{font-size:8pt}
+#printArea.plan table{table-layout:fixed}
+#printArea.plan th{background:#ddd;font-size:9pt;padding:3px 4px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+#printArea.plan td{padding:1px 4px;vertical-align:top;line-height:1.2;border:1px solid #777}
+#printArea.plan td.tagz{font-weight:bold;white-space:nowrap}
+#printArea.plan td.tagz small{display:block;font-weight:normal;font-size:7.5pt}
+#printArea.plan tr.teil2 td{border-top:1px dashed #777}
+#printArea.plan tr.teil1 td{border-bottom:0}
+#printArea.plan tr{page-break-inside:avoid}
+#printArea.plan .notiz{box-sizing:border-box;margin-top:5px;border:1px solid #777;height:24mm;padding:3px 4px;font-size:8pt}
+#printArea.plan .fuss{margin-top:3px;font-size:7pt;display:flex;justify-content:space-between}
 @media print{
   body{background:#fff}
   body>*{display:none !important}
@@ -115,6 +130,7 @@ button.mini.warn{color:var(--bad);border-color:#e6c6c3}
   #printArea th{background:#eee}
   .sign{margin-top:40px;display:flex;gap:40px}
   .sign div{flex:1;border-top:1px solid #333;padding-top:4px;font-size:11px}
+  @page{size:A4 portrait;margin:10mm}
 }
 </style>
 </head>
@@ -531,6 +547,7 @@ function monatView(admin){
       ${admin?`<span><span class="stufe offen"></span>nicht eingestuft</span>`:""}
     </div>
     <p class="hint">Tag antippen, um in der Wochenansicht einzutragen oder zu ändern.</p>
+    <button class="btn sec" data-act="plan-druck">Monat drucken (A4)</button>
   </div>
   <div class="card flat">
     ${tage.length===0?`<div class="daybox"><span class="muted">In diesem Monat ist kein Öffnungstag eingetragen.</span></div>`:""}
@@ -1070,6 +1087,7 @@ document.addEventListener("click", ev=>{
   if(a==="logout"){ stopSync(); auth.signOut(); return; }
   if(a==="tab"){ VIEW=el.dataset.v; detailId=null; editZeitId=null; editDienstId=null; return render(); }
   if(a==="plan-modus"){ planModus=el.dataset.d; if(planModus==="monat") planMonat=0; render(); try{ window.scrollTo(0,0); }catch(x){} return; }
+  if(a==="plan-druck") return druckPlan();
   if(a==="plan-monat"){ planMonat = el.dataset.d==="0"?0:planMonat+Number(el.dataset.d); return render(); }
   if(a==="monat-tag"){
     const t=el.dataset.datum; weekOffset=wocheVon(t); planModus="woche"; render();
@@ -1373,11 +1391,60 @@ function lohnExport(){
   const csv="\uFEFF"+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\r\n");
   lade(new Blob([csv],{type:"text/csv"}),"lohn_"+mk+".csv");
 }
+function kurzName(n){ const t=String(n||"").trim().split(/\s+/); return t.length>1?t[0]+" "+t[t.length-1][0]+".":t[0]||"?"; }
+function druckPlan(){
+  const mk=monatKey(planMonat), ds=dienstList(), offen=tageOffen();
+  const j=Number(mk.slice(0,4)), mo=Number(mk.slice(5,7)), anz=new Date(j,mo,0).getDate();
+  const tage=Array.from({length:anz},(_,i)=>mk+"-"+pad(i+1))
+    .filter(t=>offen.indexOf(dParse(t).getDay())>=0||ds.some(d=>d.datum===t));
+  const zelle=liste=>liste.sort((a,b)=>dienstSort(a)-dienstSort(b)||((DATA.mitarbeiter[a.maId]||{}).name||"").localeCompare((DATA.mitarbeiter[b.maId]||{}).name||""))
+    .map(d=>{
+      const n=(DATA.mitarbeiter[d.maId]||{}).name;
+      const sym=istService(d)?(istErfahren(d.maId)?"★ ":"○ "):"";
+      return `${sym}${esc(d.von||dienstLabel(d))} ${esc(kurzName(n))}`;
+    }).join("<br>");
+  let zeilen="";
+  tage.forEach(t=>{
+    const alle=ds.filter(d=>d.datum===t);
+    const notizen=[...new Set(alle.map(d=>d.notiz).filter(Boolean))];
+    const dt=dParse(t), so=dt.getDay()===0;
+    const teile=[];
+    const mit=alle.filter(d=>schichtVon(d)==="mittag"), abd=alle.filter(d=>schichtVon(d)==="abend");
+    if(so||(mit.length&&abd.length)){ teile.push(["Mittag",mit]); teile.push(["Abend",abd]); }
+    else teile.push(["",alle]);
+    teile.forEach((tl,i)=>{
+      const cls=teile.length>1?(i===0?"teil1":"teil2"):"";
+      const kopf=i===0
+        ? `${WT[dt.getDay()]} ${pad(dt.getDate())}.${pad(dt.getMonth()+1)}.${tl[0]?`<small>${tl[0]}</small>`:""}${notizen.length?`<small>${esc(notizen.join(", "))}</small>`:""}`
+        : `<small>${tl[0]}</small>`;
+      zeilen+=`<tr class="${cls}"><td class="tagz">${kopf}</td>${PLAN_BEREICHE.map(b=>`<td>${zelle(tl[1].filter(d=>bereichVonDienst(d)===b))}</td>`).join("")}</tr>`;
+    });
+  });
+  const pa=document.getElementById("printArea");
+  pa.className="plan";
+  pa.innerHTML=`
+    <div class="kopf"><h1>Dienstplan ${monatLabel(planMonat)}</h1><span>Landgasthof zur Post</span></div>
+    <div class="leg">★ erfahrene Bedienung · ○ Newcomer</div>
+    <table><colgroup><col style="width:15%">${PLAN_BEREICHE.map(b=>`<col style="width:${b==="Service"?25:15}%">`).join("")}</colgroup>
+      <thead><tr><th>Tag</th>${PLAN_BEREICHE.map(b=>`<th>${b}</th>`).join("")}</tr></thead>
+      <tbody>${zeilen||`<tr><td colspan="${PLAN_BEREICHE.length+1}">Keine Öffnungstage in diesem Monat.</td></tr>`}</tbody></table>
+    <div class="notiz">Notizen:</div>
+    <div class="fuss"><span>Gedruckt am ${new Date().toLocaleDateString("de-DE")} um ${new Date().toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})}</span><span>Änderungen nur in der App – maßgeblich ist die App.</span></div>`;
+  /* auf eine Seite einpassen: Höhe bei Druckbreite (190 mm) messen und bei Bedarf verkleinern */
+  pa.style.zoom="";
+  const st=pa.getAttribute("style")||"";
+  pa.setAttribute("style","display:block;position:absolute;left:-9999px;top:0;width:190mm");
+  const mm=pa.scrollHeight/3.7795, max=274;
+  pa.setAttribute("style",st);
+  pa.style.zoom = mm>max ? String(Math.floor(max/mm*100)/100) : "";
+  window.print();
+}
 function printZettel(id){
   const m=DATA.mitarbeiter[id]; if(!m) return;
   const mk=monatKey(monthOffset);
   const zs=zeitList().filter(z=>z.maId===id&&z.datum.startsWith(mk)).sort((a,b)=>a.datum.localeCompare(b.datum)||min(a.von)-min(b.von));
   const sum=zs.reduce((s,z)=>s+netto(z),0);
+  document.getElementById("printArea").className=""; document.getElementById("printArea").style.zoom="";
   document.getElementById("printArea").innerHTML=`
     <h2 style="font-family:sans-serif">Stundennachweis ${monatLabel(monthOffset)}</h2>
     <p style="font-family:sans-serif">${esc(m.name)} · ${esc(bereichText(m))}</p>
