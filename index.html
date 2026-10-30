@@ -40,6 +40,9 @@ input,select{width:100%;padding:11px 10px;border:1px solid var(--line);border-ra
 input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent2);outline-offset:1px}
 .row{display:flex;gap:8px}
 .row>*{flex:1;min-width:0}
+.zw{display:flex;align-items:center;gap:4px}
+.zw select{flex:1;min-width:0;padding:11px 4px;text-align:center}
+.zw span{font-weight:700;color:var(--ink2)}
 button.btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:12px 14px;font:700 16px Nunito;cursor:pointer;width:100%;margin-top:12px}
 button.btn.sec{background:#fff;color:var(--accent);border:1px solid var(--accent)}
 button.btn.ghost{background:transparent;color:var(--ink2);border:1px solid var(--line)}
@@ -669,7 +672,7 @@ function dienstFormular(){
     <label for="d_datum">Datum</label>
     <input type="date" id="d_datum" value="${d?d.datum:(uiNewDate||heute())}">
     <label for="d_von">Beginn</label>
-    <input type="time" id="d_von" value="${d?dienstZeit(d):"17:00"}">
+    ${zeitWahl("d_von",d?dienstZeit(d):"17:00")}
     <label for="d_notiz">Notiz (optional)</label>
     <input id="d_notiz" value="${d?esc(d.notiz||""):""}" placeholder="z. B. Hochzeit Saal">
     <button class="btn" data-act="dienst-save">${d?"Änderung speichern":"Dienst speichern"}</button>
@@ -690,8 +693,8 @@ function zeitForm(){
       <option value="${gestern()}" ${d===gestern()?"selected":""}>Gestern · ${dLabel(gestern())}</option>
     </select>
     <div class="row">
-      <div><label for="z_von">Von</label><input type="time" id="z_von" value="${z?z.von:""}" data-live></div>
-      <div><label for="z_bis">Bis</label><input type="time" id="z_bis" value="${z?z.bis:""}" data-live></div>
+      <div><label for="z_von">Von</label>${zeitWahl("z_von",z?z.von:"",true)}</div>
+      <div><label for="z_bis">Bis</label>${zeitWahl("z_bis",z?z.bis:"",true)}</div>
     </div>
     <label for="z_pause">Pause in Minuten</label>
     <input type="number" id="z_pause" min="0" step="5" inputmode="numeric" value="${z?(z.pause||0):0}" data-live data-pause>
@@ -730,12 +733,36 @@ function liveCalc(){
   el.innerHTML=html;
 }
 function zeitText(m){ m=((m%1440)+1440)%1440; return pad(Math.floor(m/60))+":"+pad(m%60); }
+/* Uhrzeit-Auswahl im 15-Minuten-Takt: Stunde + Minute, Wert steht im versteckten Feld mit der id */
+const VIERTEL=["00","15","30","45"];
+function zeitWahl(id,wert,live){
+  const m=/^(\d{1,2}):(\d{2})$/.exec(wert||""), h=m?pad(Number(m[1])):"", mi=m?m[2]:"";
+  const minuten=VIERTEL.slice(); if(mi&&minuten.indexOf(mi)<0){ minuten.push(mi); minuten.sort(); }   // alte, krumme Zeit bleibt erhalten
+  let ho=`<option value="">––</option>`; for(let i=0;i<24;i++){ const v=pad(i); ho+=`<option value="${v}" ${v===h?"selected":""}>${v}</option>`; }
+  const mo=`<option value="">––</option>`+minuten.map(v=>`<option value="${v}" ${v===mi?"selected":""}>${v}</option>`).join("");
+  return `<div class="zw"><select id="${id}_h" data-zw="${id}" aria-label="Stunde">${ho}</select><span>:</span><select id="${id}_m" data-zw="${id}" aria-label="Minute">${mo}</select>`
+    +`<input type="hidden" id="${id}" value="${h&&mi?h+":"+mi:""}" ${live?"data-live":""}></div>`;
+}
+function zeitWahlSync(id){
+  const h=document.getElementById(id+"_h"), mi=document.getElementById(id+"_m"), f=document.getElementById(id);
+  if(!h||!mi||!f) return;
+  if(h.value&&!mi.value) mi.value="00";
+  const neu=h.value&&mi.value?h.value+":"+mi.value:"";
+  if(f.value===neu) return;
+  f.value=neu;
+  f.dispatchEvent(new Event("input",{bubbles:true}));
+}
+function setZeit(id,wert){
+  const f=document.getElementById(id); if(!f) return;
+  const w=document.createElement("div"); w.innerHTML=zeitWahl(id,wert,f.hasAttribute("data-live"));
+  f.parentNode.replaceWith(w.firstChild);
+}
 function endePlus(){
   const v=document.getElementById("z_von"), b=document.getElementById("z_bis"), p=document.getElementById("z_pause");
   if(!v||!b||!v.value||!b.value) return;
   const br=dauer(v.value,b.value), ext=pflichtPause(br);
   if(!ext) return;
-  b.value=zeitText(min(v.value)+br+ext);
+  setZeit("z_bis",zeitText(min(v.value)+br+ext));
   p.value=ext;
   liveCalc();
 }
@@ -879,8 +906,8 @@ function adminDetail(){
     <h2>${z?"Eintrag ändern":"Zeit für "+esc(m.name)+" nachtragen"}</h2>
     <label for="a_datum">Datum</label><input type="date" id="a_datum" value="${z?z.datum:heute()}">
     <div class="row">
-      <div><label for="a_von">Von</label><input type="time" id="a_von" value="${z?z.von:""}"></div>
-      <div><label for="a_bis">Bis</label><input type="time" id="a_bis" value="${z?z.bis:""}"></div>
+      <div><label for="a_von">Von</label>${zeitWahl("a_von",z?z.von:"")}</div>
+      <div><label for="a_bis">Bis</label>${zeitWahl("a_bis",z?z.bis:"")}</div>
     </div>
     <label for="a_pause">Pause in Minuten</label>
     <input type="number" id="a_pause" min="0" step="5" inputmode="numeric" value="${z?(z.pause||0):0}">
@@ -1151,6 +1178,9 @@ document.addEventListener("input", ev=>{
   if(ev.target.classList&&ev.target.classList.contains("m_ber")&&ev.target.value===SERVICE){
     const r=document.getElementById("m_stufe_row"); if(r) r.style.display=ev.target.checked?"block":"none";
   }
+});
+document.addEventListener("change", ev=>{
+  if(ev.target.dataset&&ev.target.dataset.zw) zeitWahlSync(ev.target.dataset.zw);
 });
 document.addEventListener("keydown", ev=>{
   if(ev.key!=="Enter") return;
