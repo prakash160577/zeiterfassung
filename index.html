@@ -697,7 +697,7 @@ function zeitForm(){
       <div><label for="z_bis">Bis</label>${zeitWahl("z_bis",z?z.bis:"",true)}</div>
     </div>
     <label for="z_pause">Pause in Minuten</label>
-    <input type="number" id="z_pause" min="0" step="5" inputmode="numeric" value="${z?(z.pause||0):0}" data-live data-pause>
+    <select id="z_pause" data-live data-pause>${pauseOptionen(z?z.pause:0)}</select>
     <p class="hint" id="calc">Ab mehr als 6 Stunden Arbeitszeit sind 30 Minuten Pause Pflicht, ab mehr als 9 Stunden 45 Minuten.</p>
     <button class="btn" data-act="zeit-save">${z?"Korrektur speichern":"Zeit speichern"}</button>
     ${z?`<button class="btn ghost" data-act="zeit-abbruch">Abbrechen</button>`:""}
@@ -742,6 +742,11 @@ function zeitWahl(id,wert,live){
   const mo=`<option value="">––</option>`+minuten.map(v=>`<option value="${v}" ${v===mi?"selected":""}>${v}</option>`).join("");
   return `<div class="zw"><select id="${id}_h" data-zw="${id}" aria-label="Stunde">${ho}</select><span>:</span><select id="${id}_m" data-zw="${id}" aria-label="Minute">${mo}</select>`
     +`<input type="hidden" id="${id}" value="${h&&mi?h+":"+mi:""}" ${live?"data-live":""}></div>`;
+}
+function pauseOptionen(wert){   // Pause im 15-Minuten-Takt, alte abweichende Werte bleiben erhalten
+  const w=Number(wert||0), l=[]; for(let i=0;i<=180;i+=15) l.push(i);
+  if(l.indexOf(w)<0){ l.push(w); l.sort((a,b)=>a-b); }
+  return l.map(v=>`<option value="${v}" ${v===w?"selected":""}>${v} Min</option>`).join("");
 }
 function zeitWahlSync(id){
   const h=document.getElementById(id+"_h"), mi=document.getElementById(id+"_m"), f=document.getElementById(id);
@@ -910,7 +915,7 @@ function adminDetail(){
       <div><label for="a_bis">Bis</label>${zeitWahl("a_bis",z?z.bis:"")}</div>
     </div>
     <label for="a_pause">Pause in Minuten</label>
-    <input type="number" id="a_pause" min="0" step="5" inputmode="numeric" value="${z?(z.pause||0):0}">
+    <select id="a_pause">${pauseOptionen(z?z.pause:0)}</select>
     <button class="btn" data-act="a-zeit-save">${z?"Änderung speichern":"Eintrag anlegen"}</button>
     ${z?`<button class="btn ghost" data-act="zeit-abbruch">Abbrechen</button>`:""}
   </div>
